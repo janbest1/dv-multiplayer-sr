@@ -573,6 +573,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         }
 
         //do we need a condition to check if it's attached to something else (last attach vs current attach)?
+        Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, no car found for parent {transform.parent}, falling back to Dropped");
         return ItemState.Dropped;
 
     }
@@ -625,7 +626,32 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             }
         }
 
+        //A loco's loaded interior is not a child of its TrainCar, so items put down in a cab have to be matched against it
+        if (parentCar == null)
+            parentCar = FindCarByInterior(currentParent);
+
         return changed;
+    }
+
+    /// <summary>
+    /// Finds the car whose loaded interior the given transform belongs to.
+    /// </summary>
+    private static TrainCar FindCarByInterior(Transform child)
+    {
+        TrainCarRegistry registry = TrainCarRegistry.Instance;
+
+        if (child == null || registry == null || registry.logicCarToTrainCar == null)
+            return null;
+
+        foreach (TrainCar trainCar in registry.logicCarToTrainCar.Values)
+        {
+            Transform interior = trainCar == null ? null : trainCar.loadedInterior?.transform;
+
+            if (interior != null && child.IsChildOf(interior))
+                return trainCar;
+        }
+
+        return null;
     }
 
     private void ApplyTrackedValues(Dictionary<string, object> newValues)
