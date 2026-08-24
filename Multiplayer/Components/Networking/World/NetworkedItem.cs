@@ -97,6 +97,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private Vector3 throwDirection;
 
     //Track the car an item belongs to, so it can be synced relative to that car
+    private const float SETTLED_VELOCITY = 0.05f;
     private const float CAR_WAIT_TIMEOUT = 30f;
     private const float CAR_WAIT_INTERVAL = 0.5f;
     private TrainCar parentCar;
@@ -313,7 +314,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //so a change of parent is treated as a possible state change.
         bool parentChanged = RefreshParentCar();
 
-        if (!stateDirty && !hasDirtyVals && !parentChanged)
+        //Putting an item down counts as a throw, so a thrown item is still in flight. Keep
+        //evaluating it until it comes to rest, otherwise it never leaves the Thrown state.
+        bool settling = !wasThrown && lastState == ItemState.Thrown;
+
+        if (!stateDirty && !hasDirtyVals && !parentChanged && !settling)
             return null;
 
         ItemState currentState = GetItemState();
@@ -321,7 +326,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //Items held by another player are deactivated for us, we must not report state for those
         if (gameObject.activeInHierarchy &&
             (currentState != lastState || (currentState == ItemState.OnCar && parentCar.GetNetId() != lastCarNetId)))
-            stateDirty = true;
+        {
+            //Only report where a thrown item ended up once it has actually stopped moving
+            if (!settling || HasSettled())
+                stateDirty = true;
+        }
 
         if (!stateDirty && !hasDirtyVals)
             return null;
@@ -566,6 +575,19 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //do we need a condition to check if it's attached to something else (last attach vs current attach)?
         return ItemState.Dropped;
 
+    }
+
+    /// <summary>
+    /// Whether the item has stopped moving. Used to find where a thrown item came to rest.
+    /// </summary>
+    private bool HasSettled()
+    {
+        Rigidbody itemRigidbody = Item?.ItemRigidbody;
+
+        if (itemRigidbody == null)
+            return true;
+
+        return itemRigidbody.IsSleeping() || itemRigidbody.velocity.sqrMagnitude <= SETTLED_VELOCITY * SETTLED_VELOCITY;
     }
 
     /// <summary>
