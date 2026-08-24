@@ -94,6 +94,8 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     public bool DebugLogging;
     [Draw("Enable Log File", Tooltip = "Whether to create a separate file for logs. This is useful for debugging, but should otherwise be kept off.", VisibleOn = "ShowAdvancedSettings|true")]
     public bool EnableLogFile;
+    [Draw("Dump Item Info", Tooltip = "Logs every item prefab and the components it carries when a session starts. Only needed when adding sync support for an item.", VisibleOn = "ShowAdvancedSettings|true")]
+    public bool DumpItemInfo;
     [Draw("Enable NAT Punch", VisibleOn = "ShowAdvancedSettings|true")]
     public bool EnableNatPunch = true;
     [Draw("Reuse NetPacketReaders", VisibleOn = "ShowAdvancedSettings|true")]

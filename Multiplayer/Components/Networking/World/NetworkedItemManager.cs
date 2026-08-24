@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using DV.Utils;
 using UnityEngine;
 using JetBrains.Annotations;
@@ -78,6 +79,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         NetworkLifecycle.Instance.OnTick += Common_OnTick;
 
         BuildPrefabLookup();
+
+        if (Multiplayer.Settings.DumpItemInfo)
+            DumpItemPrefabs();
     }
 
     protected override void OnDestroy()
@@ -478,6 +482,34 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             }
         }
     }
+
+    /// <summary>
+    /// Logs every item prefab together with the non-Unity components it carries. Syncing an item's
+    /// internal state means hooking one of those components, so this is the starting point for
+    /// working out what still needs support.
+    /// </summary>
+    private void DumpItemPrefabs()
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("NetworkedItemManager.DumpItemPrefabs() prefab | components");
+
+        foreach (var item in Globals.G.Items.items)
+        {
+            if (item == null)
+                continue;
+
+            var components = item.GetComponentsInChildren<Component>(true)
+                                 .Where(component => component != null && component.GetType().Namespace?.StartsWith("UnityEngine") != true)
+                                 .Select(component => component.GetType().Name)
+                                 .Distinct()
+                                 .OrderBy(componentName => componentName);
+
+            sb.AppendLine($"{item.ItemPrefabName} | {string.Join(", ", components)}");
+        }
+
+        Multiplayer.Log(sb.ToString());
+    }
+
     public void CacheWorldItems()
     {
         if (NetworkLifecycle.Instance.IsHost())
