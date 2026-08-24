@@ -1,4 +1,4 @@
-﻿using DV.CabControls;
+using DV.CabControls;
 using DV.Interaction;
 using DV.InventorySystem;
 using DV.Items;

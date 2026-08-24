@@ -182,6 +182,8 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private readonly Dictionary<string, float> lastSentTrainDamages = [];
 
     private InteriorControlsManager interiorControlsManager;
+    private Coroutine interiorRoutine;
+    private Coroutine hookControlsRoutine;
     private readonly Dictionary<ControlImplBase, Action<ValueChangedEventArgs>> scrollableControlDelegates = [];
     private Dictionary<InteriorControlsManager.ControlType, OverridableBaseControl> controlTypeToControl = [];
     private readonly Dictionary<uint, OverridableBaseControl> portToBaseControl = [];
@@ -480,7 +482,32 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     {
         Multiplayer.LogDebug(() => $"OnTrainCarInteriorLoaded() {CurrentID}, interior is null: {interior == null}");
 
-        StartCoroutine(WaitForInterior());
+        //The game raises this again right after an unload, with nothing left to hook up
+        if (interior == null)
+            return;
+
+        StopInteriorRoutines();
+
+        interiorRoutine = StartCoroutine(WaitForInterior());
+    }
+
+    /// <summary>
+    /// Drops a hookup that is still in progress, so re-entering a cab can't leave two of them
+    /// running and subscribing to the same controls twice.
+    /// </summary>
+    private void StopInteriorRoutines()
+    {
+        if (interiorRoutine != null)
+        {
+            StopCoroutine(interiorRoutine);
+            interiorRoutine = null;
+        }
+
+        if (hookControlsRoutine != null)
+        {
+            CoroutineManager.Instance?.Stop(hookControlsRoutine);
+            hookControlsRoutine = null;
+        }
     }
 
     private IEnumerator WaitForInterior()
@@ -500,6 +527,7 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
         if (TrainCar?.loadedInterior == null)
         {
+            interiorRoutine = null;
             Multiplayer.LogError($"TrainCar {CurrentID} failed to load an interior");
             yield break;
         }
@@ -514,7 +542,15 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             }
         );
 
-        CoroutineManager.Instance.StartCoroutine(HookControls(interiorControlsManager));
+        interiorRoutine = null;
+
+        if (interiorControlsManager == null)
+        {
+            Multiplayer.LogWarning($"TrainCar {CurrentID} loaded an interior without an InteriorControlsManager");
+            yield break;
+        }
+
+        hookControlsRoutine = CoroutineManager.Instance.StartCoroutine(HookControls(interiorControlsManager));
     }
 
     private IEnumerator HookControls(InteriorControlsManager interiorControlsManager)
@@ -559,7 +595,9 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             if (ObiGrabHandler != null)
             {
                 // Handle grab/ungrab events
+                ObiGrabHandler.Grabbed -= Client_ControlGrabbed;
                 ObiGrabHandler.Grabbed += Client_ControlGrabbed;
+                ObiGrabHandler.Ungrabbed -= Client_ControlUngrabbed;
                 ObiGrabHandler.Ungrabbed += Client_ControlUngrabbed;
 
                 portNetIdToControl[netId] = ObiGrabHandler;
@@ -568,7 +606,9 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             else
             {
                 // Standard control grab/ungrab events
+                control.controlImplBase.Grabbed -= Client_ControlGrabbed;
                 control.controlImplBase.Grabbed += Client_ControlGrabbed;
+                control.controlImplBase.Ungrabbed -= Client_ControlUngrabbed;
                 control.controlImplBase.Ungrabbed += Client_ControlUngrabbed;
 
                 portNetIdToControl[netId] = control.controlImplBase;
@@ -578,6 +618,9 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
             // Handle scroll events for scrollable controls
             if (control.scrollable != null)
             {
+                if (scrollableControlDelegates.TryGetValue(control.controlImplBase, out var previous))
+                    control.controlImplBase.ValueChanged -= previous;
+
                 void ScrollChanged(ValueChangedEventArgs args) => Client_ControlScrolled(control);
                 scrollableControlDelegates[control.controlImplBase] = ScrollChanged;
                 control.controlImplBase.ValueChanged += ScrollChanged;
@@ -594,6 +637,9 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
     private void OnTrainCarInteriorUnloaded(GameObject interior)
     {
         Multiplayer.LogDebug(() => $"OnTrainCarInteriorUnloaded() {CurrentID}");
+
+        //Has to come first, a hookup still running would subscribe to controls we are about to drop
+        StopInteriorRoutines();
 
         foreach (var control in controlToPortNetId.Keys)
         {
