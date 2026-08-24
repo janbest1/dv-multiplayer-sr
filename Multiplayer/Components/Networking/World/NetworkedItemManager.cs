@@ -564,12 +564,69 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             foreach (var kvp in seen)
                 AppendTypeMembers(sb, kvp.Key, kvp.Value);
 
+            //These never sit on an item prefab: the gadget itself lives on a separate prefab, and
+            //the drillable surface belongs to the loco. Resolve them by name instead.
+            foreach (string typeName in new[]
+                     {
+                         "DV.Customization.Gadgets.GadgetBase",
+                         "DV.Customization.Gadgets.GadgetPlacingContext",
+                         "DV.Customization.Gadgets.MountPoint+States",
+                         "Drillable"
+                     })
+            {
+                Type resolved = FindType(typeName);
+
+                if (resolved == null)
+                {
+                    sb.AppendLine($"\r\n=== {typeName}: not found ===");
+                    continue;
+                }
+
+                if (resolved.IsEnum)
+                {
+                    sb.AppendLine($"\r\n=== {resolved.FullName} (enum) ===");
+                    foreach (object value in Enum.GetValues(resolved))
+                        sb.AppendLine($"  {Convert.ToInt64(value)} = {value}");
+
+                    continue;
+                }
+
+                AppendTypeMembers(sb, resolved, "resolved by name");
+            }
+
             Multiplayer.Log(sb.ToString());
         }
         catch (Exception e)
         {
             Multiplayer.LogError($"NetworkedItemManager.DumpGadgetApi() {e.Message}\r\n{e.StackTrace}");
         }
+    }
+
+    /// <summary>
+    /// Finds a loaded type by full name, falling back to its short name when the namespace is unknown.
+    /// </summary>
+    private static Type FindType(string name)
+    {
+        Type byName = Type.GetType(name);
+
+        if (byName != null)
+            return byName;
+
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            try
+            {
+                foreach (Type type in assembly.GetTypes())
+                    if (type.FullName == name || type.Name == name)
+                        return type;
+            }
+            catch (ReflectionTypeLoadException)
+            {
+                //An assembly we cannot fully load is not where these types live
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
