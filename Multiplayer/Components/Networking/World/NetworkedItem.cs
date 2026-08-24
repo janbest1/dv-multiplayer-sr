@@ -634,24 +634,46 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     }
 
     /// <summary>
-    /// Finds the car whose loaded interior the given transform belongs to.
+    /// Finds the car the given transform belongs to when it isn't a child of the car itself,
+    /// which is the case for anything put down inside a loco interior.
     /// </summary>
     private static TrainCar FindCarByInterior(Transform child)
     {
-        TrainCarRegistry registry = TrainCarRegistry.Instance;
-
-        if (child == null || registry == null || registry.logicCarToTrainCar == null)
+        if (child == null)
             return null;
 
+        //The game resolves a car from anything belonging to it, interiors included
+        TrainCar resolved = TrainCar.Resolve(child);
+
+        if (resolved != null)
+            return resolved;
+
+        TrainCarRegistry registry = TrainCarRegistry.Instance;
+
+        if (registry == null || registry.logicCarToTrainCar == null)
+            return null;
+
+        //A car keeps two interiors, the streamed one only exists while a player is inside
         foreach (TrainCar trainCar in registry.logicCarToTrainCar.Values)
         {
-            Transform interior = trainCar == null ? null : trainCar.loadedInterior?.transform;
+            if (trainCar == null)
+                continue;
 
-            if (interior != null && child.IsChildOf(interior))
+            if (IsBelow(child, trainCar.loadedInterior?.transform) || IsBelow(child, trainCar.interior?.transform))
                 return trainCar;
         }
 
+        Multiplayer.LogDebug(() => $"FindCarByInterior() no car owns {child.name}, root: {child.root.name}, cars: {registry.logicCarToTrainCar.Count}");
+
         return null;
+    }
+
+    /// <summary>
+    /// Checks whether a transform is the given interior or sits somewhere below it.
+    /// </summary>
+    private static bool IsBelow(Transform child, Transform interior)
+    {
+        return interior != null && child.IsChildOf(interior);
     }
 
     private void ApplyTrackedValues(Dictionary<string, object> newValues)
