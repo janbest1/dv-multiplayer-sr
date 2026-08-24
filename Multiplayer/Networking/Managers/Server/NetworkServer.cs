@@ -1596,7 +1596,7 @@ public class NetworkServer : NetworkManager
         if (!NetworkLifecycle.Instance.IsHost(player))
             NetworkedGadgets.Apply(packet);
 
-        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.Complete, peer, NetworkLifecycle.Instance.IsHost(player));
+        SendNetSerializablePacketToAll(packet, DeliveryMethod.ReliableOrdered, peer, NetworkLifecycle.Instance.IsHost(player));
     }
 
     private void OnCommonPaintThemePacket(CommonPaintThemePacket packet, ITransportPeer peer)

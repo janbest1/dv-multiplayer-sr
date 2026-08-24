@@ -1911,7 +1911,8 @@ public class NetworkClient : NetworkManager
     {
         LogDebug(() => $"SendGadgetChange() {packet?.Action}, car: {packet?.CarNetId}, uid: {packet?.Uid}");
 
-        SendPacketToServer(packet, DeliveryMethod.ReliableOrdered);
+        //CommonGadgetPacket writes itself, so it has to go out through the INetSerializable path
+        SendNetSerializablePacketToServer(packet, DeliveryMethod.ReliableOrdered);
     }
 
     public void SendPaintThemeChange(NetworkedTrainCar netTraincar, TrainCarPaint.Target targetArea, uint themeId)

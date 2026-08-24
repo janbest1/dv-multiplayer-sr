@@ -11,13 +11,23 @@ namespace Multiplayer.Patches.World.Gadgets;
 public static class DrillablePatch
 {
     /// <summary>
-    /// Drilling, taping and freeing a screw point all end up here.
+    /// Drilling, taping and freeing a screw point all end up here. The call is a no-op when the
+    /// point is already in the requested state, so remember what it was and only report a change.
     /// </summary>
     [HarmonyPatch(nameof(Drillable.SetMountPointState))]
-    [HarmonyPostfix]
-    static void SetMountPointState(Drillable __instance, int index, MountPoint.States newState)
+    [HarmonyPrefix]
+    static void SetMountPointStatePrefix(Drillable __instance, int index, out MountPoint.States __state)
     {
-        if (NetworkedGadgets.IsApplyingRemoteChange)
+        __state = index >= 0 && index < __instance.MountPointCount
+            ? __instance.GetMountPointState(index)
+            : MountPoint.States.None;
+    }
+
+    [HarmonyPatch(nameof(Drillable.SetMountPointState))]
+    [HarmonyPostfix]
+    static void SetMountPointStatePostfix(Drillable __instance, int index, MountPoint.States newState, MountPoint.States __state)
+    {
+        if (NetworkedGadgets.IsApplyingRemoteChange || __state == newState)
             return;
 
         GadgetBase gadget = __instance.ThisGadget;
