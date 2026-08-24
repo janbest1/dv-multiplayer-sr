@@ -571,6 +571,8 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                          "DV.Customization.Gadgets.GadgetBase",
                          "DV.Customization.Gadgets.GadgetPlacingContext",
                          "DV.Customization.Gadgets.MountPoint+States",
+                         "DV.Customization.TrainCarCustomization",
+                         "DV.Customization.TrainCarCustomization+TrainCarCustomizerBase",
                          "Drillable"
                      })
             {
