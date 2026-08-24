@@ -8,6 +8,7 @@ using Multiplayer.Networking.Data;
 using Multiplayer.Components.Networking.Train;
 using Multiplayer.Components.Networking.World;
 using System;
+using System.Reflection;
 using Multiplayer.Utils;
 using DV;
 using DV.Interaction;
@@ -81,7 +82,10 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         BuildPrefabLookup();
 
         if (Multiplayer.Settings.DumpItemInfo)
+        {
             DumpItemPrefabs();
+            DumpGadgetApi();
+        }
     }
 
     protected override void OnDestroy()
@@ -510,6 +514,110 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         }
 
         Multiplayer.Log(sb.ToString());
+    }
+
+    /// <summary>
+    /// Logs what the game's gadget components actually expose, which is what syncing anything
+    /// bolted onto a loco has to go through. Everything here is reflection: the members are
+    /// looked up by name at runtime so this keeps compiling whatever the game changes.
+    /// </summary>
+    private void DumpGadgetApi()
+    {
+        try
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("NetworkedItemManager.DumpGadgetApi()");
+
+            //One prefab per component type is enough to read the API off
+            Dictionary<Type, string> seen = new Dictionary<Type, string>();
+            List<string> gadgets = new List<string>();
+
+            foreach (var item in Globals.G.Items.items)
+            {
+                if (item == null)
+                    continue;
+
+                bool isGadget = false;
+
+                foreach (Component component in item.GetComponentsInChildren<Component>(true))
+                {
+                    if (component == null)
+                        continue;
+
+                    Type type = component.GetType();
+
+                    if (type.Name != "GadgetItem" && type.Name != "MountPoint" && type.Name != "GadgetItemTextMesh")
+                        continue;
+
+                    isGadget = true;
+
+                    if (!seen.ContainsKey(type))
+                        seen[type] = item.ItemPrefabName;
+                }
+
+                if (isGadget)
+                    gadgets.Add(item.ItemPrefabName);
+            }
+
+            sb.AppendLine($"gadget prefabs ({gadgets.Count}): {string.Join(", ", gadgets.OrderBy(name => name))}");
+
+            foreach (var kvp in seen)
+                AppendTypeMembers(sb, kvp.Key, kvp.Value);
+
+            Multiplayer.Log(sb.ToString());
+        }
+        catch (Exception e)
+        {
+            Multiplayer.LogError($"NetworkedItemManager.DumpGadgetApi() {e.Message}\r\n{e.StackTrace}");
+        }
+    }
+
+    /// <summary>
+    /// Writes out one type's public surface: what can be read, written and called to drive it.
+    /// </summary>
+    private static void AppendTypeMembers(StringBuilder sb, Type type, string examplePrefab)
+    {
+        const BindingFlags FLAGS = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+
+        sb.AppendLine($"\r\n=== {type.FullName} (e.g. on {examplePrefab}) ===");
+
+        //Gadget behaviour is usually split across a base class, so walk up until Unity's own types
+        for (Type current = type; current != null && current != typeof(MonoBehaviour) && current != typeof(Component); current = current.BaseType)
+            AppendDeclaredMembers(sb, current, FLAGS, current == type);
+    }
+
+    private static void AppendDeclaredMembers(StringBuilder sb, Type type, BindingFlags FLAGS, bool isLeaf)
+    {
+        if (!isLeaf)
+            sb.AppendLine($"  -- inherited from {type.Name} --");
+
+        foreach (FieldInfo field in type.GetFields(FLAGS).OrderBy(f => f.Name))
+            sb.AppendLine($"  field    {(field.IsPublic ? "public" : "private")} {FriendlyName(field.FieldType)} {field.Name}");
+
+        foreach (PropertyInfo property in type.GetProperties(FLAGS).OrderBy(p => p.Name))
+            sb.AppendLine($"  property {FriendlyName(property.PropertyType)} {property.Name} {{{(property.CanRead ? " get;" : "")}{(property.CanWrite ? " set;" : "")} }}");
+
+        foreach (EventInfo evt in type.GetEvents(FLAGS).OrderBy(e => e.Name))
+            sb.AppendLine($"  event    {FriendlyName(evt.EventHandlerType)} {evt.Name}");
+
+        foreach (MethodInfo method in type.GetMethods(FLAGS).Where(m => !m.IsSpecialName).OrderBy(m => m.Name))
+        {
+            string parameters = string.Join(", ", method.GetParameters().Select(p => $"{FriendlyName(p.ParameterType)} {p.Name}"));
+            sb.AppendLine($"  method   {FriendlyName(method.ReturnType)} {method.Name}({parameters})");
+        }
+    }
+
+    private static string FriendlyName(Type type)
+    {
+        if (type == null)
+            return "?";
+
+        if (!type.IsGenericType)
+            return type.Name;
+
+        string arguments = string.Join(", ", type.GetGenericArguments().Select(FriendlyName));
+
+        return $"{type.Name.Split('`')[0]}<{arguments}>";
     }
 
     public void CacheWorldItems()
