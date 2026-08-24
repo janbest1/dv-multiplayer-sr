@@ -32,6 +32,10 @@ public static class GadgetItemPatch
             return;
         }
 
+        //Take the UID the game just handed out and replace it with one carrying this player's slice,
+        //so the number cannot collide with one minted on another machine at the same moment
+        NetworkedGadgets.AssignNetworkUid(__result, NetworkedGadgets.NextLocalUid());
+
         NetworkLifecycle.Instance.Client?.SendGadgetChange(new CommonGadgetPacket
         {
             Action = GadgetAction.Attached,

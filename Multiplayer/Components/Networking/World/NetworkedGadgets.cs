@@ -23,6 +23,50 @@ public static class NetworkedGadgets
     /// </summary>
     public static bool IsApplyingRemoteChange { get; private set; }
 
+    //A gadget's UID comes from a counter that runs per process, so two machines placing at the same
+    //time hand out the same number for different gadgets and TryGetCustomizerByUID then finds the
+    //wrong one. Give every player their own slice of the number space instead.
+    private const int UID_PLAYER_SHIFT = 24;
+    private const int UID_COUNTER_MASK = 0xFFFFFF;
+
+    private static int localUidCounter;
+
+    /// <summary>
+    /// Mints a UID no other machine in this session can produce, or 0 when there is no session to
+    /// collide with and the game's own numbering can stand.
+    /// </summary>
+    public static int NextLocalUid()
+    {
+        byte playerId = NetworkLifecycle.Instance?.Client?.PlayerId ?? 0;
+
+        if (playerId == 0)
+            return 0;
+
+        localUidCounter = (localUidCounter + 1) & UID_COUNTER_MASK;
+
+        if (localUidCounter == 0)
+            localUidCounter = 1;
+
+        return (playerId << UID_PLAYER_SHIFT) | localUidCounter;
+    }
+
+    /// <summary>
+    /// Gives a gadget a UID without disturbing the game's own counter. AssignUID drags that counter
+    /// up to whatever it is handed, which would push the game's next number into another player's
+    /// slice, so put it back afterwards.
+    /// </summary>
+    public static void AssignNetworkUid(GadgetBase gadget, int uid)
+    {
+        if (gadget == null || uid == 0)
+            return;
+
+        int gameCounter = TrainCarCustomization.TrainCarCustomizerBase.uidCounter;
+
+        gadget.AssignUID(uid);
+
+        TrainCarCustomization.TrainCarCustomizerBase.uidCounter = gameCounter;
+    }
+
     /// <summary>
     /// True while this item is bolted onto something as a gadget. The game hides the item away in
     /// installed gadgets for as long as that lasts, so it is not a world item and must not be synced
@@ -114,7 +158,14 @@ public static class NetworkedGadgets
         try
         {
             JObject data = JObject.Parse(state);
+
+            //SaveDataLoaded assigns the UID from the data, dragging the game's counter along with it
+            int gameCounter = TrainCarCustomization.TrainCarCustomizerBase.uidCounter;
+
             gadget.SaveDataLoaded(data);
+
+            TrainCarCustomization.TrainCarCustomizerBase.uidCounter = gameCounter;
+
             gadget.AfterSaveDataLoaded(data);
         }
         catch (Exception e)
@@ -192,6 +243,10 @@ public static class NetworkedGadgets
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) is already attached, taking it down first");
             gadgetItem.Gadget.ForceRemove(false);
         }
+
+        //Link() mints a fresh UID from the local counter whenever it finds none, which would both
+        //burn a number here and leave the gadget under the wrong id until the state lands
+        AssignNetworkUid(gadgetItem.Gadget, packet.Uid);
 
         GadgetBase gadget = GadgetItem.Place(customization, packet.LocalPosition, packet.LocalRotation, gadgetItem);
 
