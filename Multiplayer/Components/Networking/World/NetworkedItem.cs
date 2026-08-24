@@ -1,4 +1,4 @@
-using DV.CabControls;
+﻿using DV.CabControls;
 using DV.Interaction;
 using DV.InventorySystem;
 using DV.Items;
@@ -103,7 +103,6 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private TrainCar parentCar;
     private Transform lastKnownParent;
     private bool parentLookupDone;
-    private static bool loggedInteriors;
     private ushort lastCarNetId;
     private Coroutine deferredOnCar;
 
@@ -654,8 +653,6 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (registry == null || registry.logicCarToTrainCar == null)
             return null;
 
-        bool anyInterior = false;
-
         //A car keeps two interiors, the streamed one only exists while a player is inside
         foreach (TrainCar trainCar in registry.logicCarToTrainCar.Values)
         {
@@ -665,44 +662,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             Transform loaded = trainCar.loadedInterior?.transform;
             Transform interior = trainCar.interior?.transform;
 
-            anyInterior |= loaded != null || interior != null;
-
             if (IsBelow(child, loaded) || IsBelow(child, interior))
                 return trainCar;
         }
 
         Multiplayer.LogDebug(() => $"FindCarByInterior() no car owns {GetPath(child)}");
 
-        //Worth dumping once we have interiors to compare against, every world item runs through here on load
-        if (!loggedInteriors && anyInterior)
-        {
-            loggedInteriors = true;
-            Multiplayer.LogDebug(() => DescribeInteriors(registry));
-        }
-
         return null;
-    }
-
-    /// <summary>
-    /// Lists the interiors of every car that has one, to compare them against an unmatched parent.
-    /// </summary>
-    private static string DescribeInteriors(TrainCarRegistry registry)
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.AppendLine($"FindCarByInterior() interiors of {registry.logicCarToTrainCar.Count} cars:");
-
-        foreach (TrainCar trainCar in registry.logicCarToTrainCar.Values)
-        {
-            Transform loaded = trainCar == null ? null : trainCar.loadedInterior?.transform;
-            Transform interior = trainCar == null ? null : trainCar.interior?.transform;
-
-            if (loaded == null && interior == null)
-                continue;
-
-            sb.AppendLine($"\t{trainCar.ID} loadedInterior: {GetPath(loaded)}, interior: {GetPath(interior)}");
-        }
-
-        return sb.ToString();
     }
 
     /// <summary>
