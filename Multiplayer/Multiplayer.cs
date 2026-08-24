@@ -29,6 +29,8 @@ public static class Multiplayer
     private const string LOG_FILE_ARG = "--mp-log";
     private const string LOG_FILE_ENV = "DV_MP_LOG";
     private static readonly string LOG_FILE = ResolveLogFile();
+    private static StreamWriter logWriter;
+    private static bool logFileDisabled;
     private static APIProvider _apiProvider;
     private static AssetBundle assetBundle;
 
@@ -69,7 +71,15 @@ public static class Multiplayer
 
         try
         {
-            File.Delete(LOG_FILE);
+            try
+            {
+                File.Delete(LOG_FILE);
+            }
+            catch (Exception e)
+            {
+                // A locked or unwritable log file is no reason to refuse to load
+                ModEntry.Logger.Warning($"Could not clear \"{LOG_FILE}\": {e.Message}");
+            }
 
             if (LOG_FILE != DEFAULT_LOG_FILE)
                 Log($"Logging to \"{LOG_FILE}\"");
@@ -350,8 +360,37 @@ public static class Multiplayer
     {
         string str = $"[{DateTime.Now.ToUniversalTime():HH:mm:ss.fff}] {msg}";
         if (Settings.EnableLogFile)
-            File.AppendAllLines(LOG_FILE, new[] { str });
+            WriteLogFile(str);
         ModEntry.Logger.Log(str);
+    }
+
+    /// <summary>
+    /// Appends a line to the log file. Never throws: logging must not be able to abort its caller,
+    /// which previously killed the PollEvents coroutine when the file was locked.
+    /// </summary>
+    private static void WriteLogFile(string str)
+    {
+        if (logFileDisabled)
+            return;
+
+        try
+        {
+            if (logWriter == null)
+            {
+                // FileShare.ReadWrite so an open tail viewer, or a second instance pointed at the
+                // same path, causes interleaved lines rather than a sharing violation
+                FileStream stream = new FileStream(LOG_FILE, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                logWriter = new StreamWriter(stream) { AutoFlush = true };
+            }
+
+            logWriter.WriteLine(str);
+        }
+        catch (Exception e)
+        {
+            logFileDisabled = true;
+            logWriter = null;
+            ModEntry.Logger.Warning($"Log file \"{LOG_FILE}\" disabled, writing failed: {e.Message}");
+        }
     }
 
     #endregion
