@@ -115,7 +115,7 @@ public class NetworkedPlayer : MonoBehaviour
     private bool handTrackingInitialized;
 
     // Inventory and item holding
-    private GameObject inventoryRoot;
+    private GameObject inventoryRoot;  // created on demand, see EnsureInventoryRoot()
     public GameObject RightHandItemGO { get; private set; }
     private readonly List<Collider> disabledRHItemColliders = [];
     public GameObject LeftHandItemGO { get; private set; }
@@ -515,8 +515,23 @@ public class NetworkedPlayer : MonoBehaviour
     /// <param name="itemGo">The item GameObject to attach</param>
     public void AddItemToInventory(GameObject itemGo)
     {
-        itemGo.transform.SetParent(inventoryRoot.transform, true);
+        itemGo.transform.SetParent(EnsureInventoryRoot().transform, true);
         itemGo.SetActive(false);
+    }
+
+    /// <summary>
+    /// Returns the container stowed items are parented to, creating it on first use
+    /// </summary>
+    private GameObject EnsureInventoryRoot()
+    {
+        if (inventoryRoot == null)
+        {
+            inventoryRoot = new GameObject("InventoryRoot");
+            inventoryRoot.transform.SetParent(selfTransform, false);
+            inventoryRoot.SetActive(false);
+        }
+
+        return inventoryRoot;
     }
 
     /// <summary>
