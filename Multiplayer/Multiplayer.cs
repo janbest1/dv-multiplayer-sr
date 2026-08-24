@@ -30,6 +30,7 @@ public static class Multiplayer
     private const string LOG_FILE_ENV = "DV_MP_LOG";
     private static readonly string LOG_FILE = ResolveLogFile();
     private static StreamWriter logWriter;
+    private static string logFileWarning;
     private static bool logFileDisabled;
     private static APIProvider _apiProvider;
     private static AssetBundle assetBundle;
@@ -80,6 +81,9 @@ public static class Multiplayer
                 // A locked or unwritable log file is no reason to refuse to load
                 ModEntry.Logger.Warning($"Could not clear \"{LOG_FILE}\": {e.Message}");
             }
+
+            if (logFileWarning != null)
+                ModEntry.Logger.Warning(logFileWarning);
 
             if (LOG_FILE != DEFAULT_LOG_FILE)
                 Log($"Logging to \"{LOG_FILE}\"");
@@ -344,7 +348,17 @@ public static class Multiplayer
 
         try
         {
-            string dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            string full = Path.GetFullPath(path);
+
+            // Unity holds its own log open for the whole session, so sharing the path shreds both
+            string unityLog = GetUnityLogFile();
+            if (unityLog != null && string.Equals(full, unityLog, StringComparison.OrdinalIgnoreCase))
+            {
+                logFileWarning = $"Ignoring log path \"{path}\", it is already used by Unity's -logFile";
+                return DEFAULT_LOG_FILE;
+            }
+
+            string dir = Path.GetDirectoryName(full);
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
 
@@ -354,6 +368,26 @@ public static class Multiplayer
         {
             return DEFAULT_LOG_FILE;
         }
+    }
+
+    /// <summary>
+    /// Returns the full path Unity was told to log to via "-logFile", or null when it wasn't
+    /// </summary>
+    private static string GetUnityLogFile()
+    {
+        try
+        {
+            string[] args = Environment.GetCommandLineArgs();
+            for (int i = 1; i < args.Length - 1; i++)
+                if (args[i].Equals("-logFile", StringComparison.OrdinalIgnoreCase))
+                    return Path.GetFullPath(args[i + 1].Trim('"'));
+        }
+        catch (Exception)
+        {
+            // Nothing to compare against; treat it as "not set"
+        }
+
+        return null;
     }
 
     private static void WriteLog(string msg)
