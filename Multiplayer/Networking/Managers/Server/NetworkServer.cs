@@ -1596,7 +1596,9 @@ public class NetworkServer : NetworkManager
         if (!NetworkLifecycle.Instance.IsHost(player))
             NetworkedGadgets.Apply(packet);
 
-        SendNetSerializablePacketToAll(packet, DeliveryMethod.ReliableOrdered, peer, NetworkLifecycle.Instance.IsHost(player));
+        //Always exclude the host's own client: it either placed this itself or just applied it above,
+        //and letting the relay reach it made every client-side change run twice on the host
+        SendNetSerializablePacketToAll(packet, DeliveryMethod.ReliableOrdered, peer, true);
     }
 
     private void OnCommonPaintThemePacket(CommonPaintThemePacket packet, ITransportPeer peer)

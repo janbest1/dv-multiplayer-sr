@@ -196,6 +196,16 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                     continue;
                 }
 
+                //An item bolted onto a car is not lying in the world, it is the gadget now. Syncing it
+                //as a world item put a second copy of it wherever the player who placed it stood.
+                if (NetworkedGadgets.IsInstalledGadget(item.Item))
+                {
+                    if (player.NearbyItems.ContainsKey(item))
+                        player.NearbyItems.Remove(item);
+
+                    continue;
+                }
+
                 float sqrDistance = (player.WorldPosition - item.transform.position).sqrMagnitude;
 
                 if (sqrDistance <= MAX_DISTANCE_TO_ITEM_SQR)

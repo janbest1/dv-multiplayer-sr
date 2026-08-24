@@ -1,3 +1,4 @@
+using DV.CabControls;
 using DV.Customization;
 using DV.Customization.Gadgets;
 using Multiplayer.Components.Networking.Train;
@@ -21,6 +22,21 @@ public static class NetworkedGadgets
     /// game's gadget calls know not to send it straight back out again.
     /// </summary>
     public static bool IsApplyingRemoteChange { get; private set; }
+
+    /// <summary>
+    /// True while this item is bolted onto something as a gadget. The game hides the item away in
+    /// installed gadgets for as long as that lasts, so it is not a world item and must not be synced
+    /// as one, or it reappears at whoever placed it.
+    /// </summary>
+    public static bool IsInstalledGadget(ItemBase item)
+    {
+        if (item == null)
+            return false;
+
+        GadgetItem gadgetItem = item.GetComponent<GadgetItem>();
+
+        return gadgetItem != null && gadgetItem.Gadget != null && gadgetItem.Gadget.IsLinked;
+    }
 
     public static bool TryGetCustomization(ushort carNetId, out TrainCarCustomization customization)
     {
@@ -161,6 +177,20 @@ public static class NetworkedGadgets
         {
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) is not a gadget");
             return;
+        }
+
+        if (gadgetItem.Gadget == null)
+        {
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) has no gadget to place");
+            return;
+        }
+
+        //Link() throws outright on a gadget that is still attached somewhere, which happened whenever
+        //a stale attachment had not been taken down here yet
+        if (gadgetItem.Gadget.IsLinked)
+        {
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) is already attached, taking it down first");
+            gadgetItem.Gadget.ForceRemove(false);
         }
 
         GadgetBase gadget = GadgetItem.Place(customization, packet.LocalPosition, packet.LocalRotation, gadgetItem);
