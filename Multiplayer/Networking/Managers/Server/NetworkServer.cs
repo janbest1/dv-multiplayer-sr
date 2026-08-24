@@ -2098,8 +2098,10 @@ public class NetworkServer : NetworkManager
 
     private void OnCommonItemChangePacket(CommonItemChangePacket packet, ITransportPeer peer)
     {
-        //if(!TryGetServerPlayer(peer, out var player))
-        //    return;
+        if (!TryGetServerPlayer(peer, out var player))
+            return;
+
+        LogDebug(() => $"OnCommonItemChangePacket() items: {packet?.Items?.Count}, from \"{player.Username}\"");
 
         //LogDebug(()=>$"OnCommonItemChangePacket({packet?.Items?.Count}, {peer.Id} (\"{player.Username}\"))");
 
@@ -2132,7 +2134,7 @@ public class NetworkServer : NetworkManager
 
         //);
 
-        //NetworkedItemManager.Instance.ReceiveSnapshots(packet.Items, player);
+        NetworkedItemManager.Instance.ReceiveSnapshots(packet.Items, player);
     }
 
     private void OnCommonCashRegisterWithModulesActionPacket(CommonCashRegisterWithModulesActionPacket packet, ITransportPeer peer)
