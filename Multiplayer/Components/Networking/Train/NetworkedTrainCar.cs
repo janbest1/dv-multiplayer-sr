@@ -559,25 +559,34 @@ public class NetworkedTrainCar : IdMonoBehaviour<ushort, NetworkedTrainCar>
 
         Multiplayer.LogDebug(() => $"HookControls() Hooking controls for car {CurrentID}, found {interiorControlsManager?.controls?.Count} controls");
 
+        //One deadline for the whole set: waiting per control made every unresolvable one cost
+        //INTERIOR_CONTROLS_TIMEOUT in turn, delaying the controls behind it by that much again
+        float deadline = Time.time + INTERIOR_CONTROLS_TIMEOUT;
+
         // Find all control overrides
         foreach (var kvp in interiorControlsManager.controls)
         {
             var control = kvp.Value;
             var key = kvp.Key;
 
-            float timeOut = Time.time;
             yield return new WaitUntil
             (
                 () =>
                     (control.controlImplBase != null && !string.IsNullOrEmpty(control.overridableBaseControl?.portId)) ||
-                    Time.time - timeOut > INTERIOR_CONTROLS_TIMEOUT
+                    Time.time > deadline
             );
 
             var controlPortId = control.overridableBaseControl?.portId;
 
             if (string.IsNullOrEmpty(controlPortId))
             {
-                Multiplayer.LogWarning($"Unable to hook control {control.overridableBaseControl?.name ?? control.controlImplBase?.spec?.name} ({key}), has no controlPortId on car [{CurrentID}, {NetId}]");
+                //Say which half is missing, the two cases need different fixes
+                string reason = control.overridableBaseControl == null
+                    ? "no overridableBaseControl"
+                    : "empty portId";
+                string name = control.overridableBaseControl?.name ?? control.controlImplBase?.spec?.name ?? "<unnamed>";
+
+                Multiplayer.LogWarning($"Unable to hook control {name} ({key}), {reason}, controlImplBase is null: {control.controlImplBase == null}, on car [{CurrentID}, {NetId}]");
                 continue;
             }
 

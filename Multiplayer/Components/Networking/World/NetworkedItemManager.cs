@@ -117,7 +117,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             ReceivedSnapshots.Enqueue(new (snapshot, sender));
         }
 
-        //Multiplayer.LogDebug(() => $"NetworkItemManager.ReceiveSnapshots() count: {ReceivedSnapshots.Count}, from: ");
+        Multiplayer.LogDebug(() => $"NetworkItemManager.ReceiveSnapshots() count: {ReceivedSnapshots.Count}, from: ");
     }
 
     #region Common
@@ -145,7 +145,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             ItemUpdateData snapshot = snapshotInfo.Item1;
             try
             {
-                //Multiplayer.LogDebug(() => $"ProcessReceived: {snapshot.UpdateType}");
+                Multiplayer.LogDebug(() => $"ProcessReceived: {snapshot.UpdateType}");
 
                 if (snapshot == null || snapshot.UpdateType == ItemUpdateData.ItemUpdateType.None)
                 {
@@ -208,7 +208,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
                 if (currentTime - kvp.Value > NEARBY_REMOVAL_DELAY)
                 {
-                    //NetworkLifecycle.Instance.Server.LogDebug(() => $"UpdatePlayerItemLists() Removing for player: {player?.Username}, Nearby Item: {kvp.Key?.NetId}, {kvp.Key?.name}");
+                    NetworkLifecycle.Instance.Server.LogDebug(() => $"UpdatePlayerItemLists() Removing for player: {player?.Username}, Nearby Item: {kvp.Key?.NetId}, {kvp.Key?.name}");
                     player.NearbyItems.Remove(kvp.Key);
                 }
             }
@@ -227,7 +227,8 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 dirtyItems.Add(snapshot);
         }
 
-        //NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) DirtyItems: {dirtyItems.Count}");
+        if (dirtyItems.Count > 0)
+            NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) DirtyItems: {dirtyItems.Count}");
 
         foreach (var player in NetworkLifecycle.Instance.Server.ServerPlayers)
         {
@@ -242,7 +243,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 if (!player.KnownItems.ContainsKey(nearbyItem))
                 {
                     // This is a new item for the player
-                    //NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) New item for: {player.Username}, itemNetID{nearbyItem.NetId}");
+                    NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) New item for: {player.Username}, itemNetID{nearbyItem.NetId}");
 
                     ItemUpdateData snapshot = nearbyItem.CreateUpdateData(ItemUpdateData.ItemUpdateType.Create);
                     player.KnownItems[nearbyItem] = tick;
@@ -276,13 +277,14 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 }
             }
 
-            //NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) Adding {DestroyedItems.Count()} DestroyedItems for: {player.Username}");
+            if (DestroyedItems.Count > 0)
+                NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) Adding {DestroyedItems.Count()} DestroyedItems for: {player.Username}");
 
             playerUpdates.AddRange(DestroyedItems);
 
             if (playerUpdates.Count > 0)
             {
-                //NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) Sending {playerUpdates.Count()} to player: {player.Username}");
+                NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) Sending {playerUpdates.Count()} to player: {player.Username}");
                 NetworkLifecycle.Instance.Server.SendItemsChangePacket(playerUpdates, player);
             }
         }
