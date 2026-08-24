@@ -251,6 +251,7 @@ public class NetworkClient : NetworkManager
         netPacketProcessor.SubscribeReusable<ClientboundPitStopBulkUpdatePacket>(OnClientboundPitStopBulkUpdatePacket);
         netPacketProcessor.SubscribeReusable<CommonCashRegisterWithModulesActionPacket>(OnCommonCashRegisterWithModulesActionPacket);
         netPacketProcessor.SubscribeReusable<CommonGenericSwitchStatePacket>(OnCommonGenericSwitchStatePacket);
+        netPacketProcessor.SubscribeNetSerializable<CommonGadgetPacket>(OnCommonGadgetPacket);
 
         netPacketProcessor.SubscribeReusable<CommonChatPacket>(OnCommonChatPacket);
     }
@@ -1340,6 +1341,13 @@ public class NetworkClient : NetworkManager
         NetworkedItemManager.Instance.ReceiveSnapshots(packet.Items, null);
     }
 
+    private void OnCommonGadgetPacket(CommonGadgetPacket packet)
+    {
+        LogDebug(() => $"OnCommonGadgetPacket() {packet?.Action}, car: {packet?.CarNetId}, uid: {packet?.Uid}");
+
+        NetworkedGadgets.Apply(packet);
+    }
+
     private void OnCommonPaintThemePacket(CommonPaintThemePacket packet)
     {
         if (!NetworkedTrainCar.TryGet(packet.NetId, out NetworkedTrainCar netTrainCar))
@@ -1897,6 +1905,13 @@ public class NetworkClient : NetworkManager
 
         SendNetSerializablePacketToServer(new CommonItemChangePacket { Items = items },
                 DeliveryMethod.ReliableOrdered);
+    }
+
+    public void SendGadgetChange(CommonGadgetPacket packet)
+    {
+        LogDebug(() => $"SendGadgetChange() {packet?.Action}, car: {packet?.CarNetId}, uid: {packet?.Uid}");
+
+        SendPacketToServer(packet, DeliveryMethod.ReliableOrdered);
     }
 
     public void SendPaintThemeChange(NetworkedTrainCar netTraincar, TrainCarPaint.Target targetArea, uint themeId)

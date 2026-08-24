@@ -233,6 +233,9 @@ public class NetworkServer : NetworkManager
 
         // Items
         netPacketProcessor.SubscribeNetSerializable<CommonItemChangePacket, ITransportPeer>(OnCommonItemChangePacket);
+
+        // Gadgets
+        netPacketProcessor.SubscribeNetSerializable<CommonGadgetPacket, ITransportPeer>(OnCommonGadgetPacket);
     }
 
     //allow mods to register their own packets
@@ -1574,6 +1577,26 @@ public class NetworkServer : NetworkManager
     private void OnCommonHandbrakePositionPacket(CommonHandbrakePositionPacket packet, ITransportPeer peer)
     {
         SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
+    }
+
+    private void OnCommonGadgetPacket(CommonGadgetPacket packet, ITransportPeer peer)
+    {
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+            return;
+
+        if (!NetworkedTrainCar.TryGet(packet.CarNetId, out NetworkedTrainCar netTrainCar))
+        {
+            LogWarning($"Gadget change from {player.Username} for car {packet.CarNetId}, but that car does not exist");
+            return;
+        }
+
+        LogDebug(() => $"OnCommonGadgetPacket() {packet.Action} from {player.Username} for [{netTrainCar?.CurrentID}, {packet.CarNetId}], uid: {packet.Uid}");
+
+        //The host already ran the change locally when its own patch fired
+        if (!NetworkLifecycle.Instance.IsHost(player))
+            NetworkedGadgets.Apply(packet);
+
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.Complete, peer, NetworkLifecycle.Instance.IsHost(player));
     }
 
     private void OnCommonPaintThemePacket(CommonPaintThemePacket packet, ITransportPeer peer)
