@@ -6,7 +6,7 @@ using System;
 using UnityEngine;
 
 namespace Multiplayer.Patches.World.Items;
-/*
+//Debug only: these postfixes just report which path an item took, they change nothing
 [HarmonyPatch(typeof(StorageController))]
 public static class StorageControllerPatch
 {
@@ -79,4 +79,3 @@ public static class StorageControllerPatch
     }
 
 }
-*/
