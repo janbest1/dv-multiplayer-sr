@@ -47,12 +47,13 @@ public static class StorageControllerPatch
 
     [HarmonyPatch(nameof(StorageController.MoveItemsFromWorldToLostAndFound))]
     [HarmonyPrefix]
-    static void MoveItemsFromWorldToLostAndFound(StorageController __instance, bool ignoreItemsWithRespawnParents)
+    static void MoveItemsFromWorldToLostAndFound(StorageController __instance)
     {
-
+        //The game's parameters have changed since this was written, so take none of them: Harmony
+        //refuses to patch at all when a declared parameter no longer exists
         Multiplayer.LogDebug(() =>
         {
-            return $"StorageController.MoveItemsFromWorldToLostAndFound({ignoreItemsWithRespawnParents})\r\n{new System.Diagnostics.StackTrace()}";
+            return $"StorageController.MoveItemsFromWorldToLostAndFound()\r\n{new System.Diagnostics.StackTrace()}";
         });
     }
 
