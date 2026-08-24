@@ -25,7 +25,10 @@ namespace Multiplayer;
 
 public static class Multiplayer
 {
-    private const string LOG_FILE = "multiplayer.log";
+    private const string DEFAULT_LOG_FILE = "multiplayer.log";
+    private const string LOG_FILE_ARG = "--mp-log";
+    private const string LOG_FILE_ENV = "DV_MP_LOG";
+    private static readonly string LOG_FILE = ResolveLogFile();
     private static APIProvider _apiProvider;
     private static AssetBundle assetBundle;
 
@@ -67,6 +70,9 @@ public static class Multiplayer
         try
         {
             File.Delete(LOG_FILE);
+
+            if (LOG_FILE != DEFAULT_LOG_FILE)
+                Log($"Logging to \"{LOG_FILE}\"");
 
             Locale.Load(ModEntry.Path);
 
@@ -284,6 +290,60 @@ public static class Multiplayer
     public static void LogException(object msg, Exception e)
     {
         ModEntry.Logger.LogException($"{msg}", e);
+    }
+
+    /// <summary>
+    /// Picks the log file path, so two instances started from the same install can log separately.
+    /// Checked in order: "--mp-log &lt;path&gt;" (or "--mp-log=&lt;path&gt;") on the command line, the
+    /// DV_MP_LOG environment variable, then "multiplayer.log" next to the game.
+    /// </summary>
+    private static string ResolveLogFile()
+    {
+        try
+        {
+            string[] args = Environment.GetCommandLineArgs();
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (args[i].StartsWith(LOG_FILE_ARG + "=", StringComparison.OrdinalIgnoreCase))
+                    return PrepareLogFile(args[i].Substring(LOG_FILE_ARG.Length + 1));
+
+                if (args[i].Equals(LOG_FILE_ARG, StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                    return PrepareLogFile(args[i + 1]);
+            }
+
+            return PrepareLogFile(Environment.GetEnvironmentVariable(LOG_FILE_ENV));
+        }
+        catch (Exception)
+        {
+            // Fall through to the default; logging isn't up yet, so there's nowhere to report this.
+            return DEFAULT_LOG_FILE;
+        }
+    }
+
+    /// <summary>
+    /// Validates an overridden log path and makes sure its directory exists, falling back to the default
+    /// </summary>
+    private static string PrepareLogFile(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return DEFAULT_LOG_FILE;
+
+        path = path.Trim().Trim('"');
+        if (path.Length == 0)
+            return DEFAULT_LOG_FILE;
+
+        try
+        {
+            string dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            return path;
+        }
+        catch (Exception)
+        {
+            return DEFAULT_LOG_FILE;
+        }
     }
 
     private static void WriteLog(string msg)
