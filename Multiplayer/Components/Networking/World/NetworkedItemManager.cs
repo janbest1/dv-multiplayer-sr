@@ -4,6 +4,7 @@ using DV.Utils;
 using UnityEngine;
 using JetBrains.Annotations;
 using Multiplayer.Networking.Data;
+using Multiplayer.Components.Networking.Train;
 using Multiplayer.Components.Networking.World;
 using System;
 using Multiplayer.Utils;
@@ -341,6 +342,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
             case ItemState.Dropped:
             case ItemState.Thrown:
+            case ItemState.OnCar:
             case ItemState.Attached: //needs additional checks for distance to coupler
                 // Only owner can drop/throw
                 if (!player.OwnsItem(snapshot.ItemNetId))
@@ -431,8 +433,10 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 return;
             }
 
+            GetSpawnPose(snapshot, out Vector3 spawnPosition, out Quaternion spawnRotation);
+
             //create a new item
-            GameObject gameObject = Instantiate(spec.gameObject, snapshot.ItemPosition + WorldMover.currentMove, snapshot.ItemRotation);
+            GameObject gameObject = Instantiate(spec.gameObject, spawnPosition, spawnRotation);
 
             //Make sure we have a NetworkedItem
             newItem = gameObject.GetOrAddComponent<NetworkedItem>();
@@ -442,6 +446,24 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         newItem.NetId = snapshot.ItemNetId;
 
         newItem.ReceiveSnapshot(snapshot);
+    }
+
+    /// <summary>
+    /// Resolves the world pose to spawn an item at. Items resting on a car are stored relative to
+    /// that car, so they have to be transformed back into world space before instantiating.
+    /// </summary>
+    private void GetSpawnPose(ItemUpdateData snapshot, out Vector3 position, out Quaternion rotation)
+    {
+        if (snapshot.ItemState == ItemState.OnCar &&
+            NetworkedTrainCar.TryGet(snapshot.CarNetId, out TrainCar trainCar) && trainCar != null)
+        {
+            position = trainCar.transform.TransformPoint(snapshot.ItemPosition);
+            rotation = trainCar.transform.rotation * snapshot.ItemRotation;
+            return;
+        }
+
+        position = snapshot.ItemPosition + WorldMover.currentMove;
+        rotation = snapshot.ItemRotation;
     }
 
     private void BuildPrefabLookup()

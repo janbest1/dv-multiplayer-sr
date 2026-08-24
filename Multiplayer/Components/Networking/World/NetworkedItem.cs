@@ -21,7 +21,8 @@ public enum ItemState : byte
     Thrown,         //was thrown by player
     InHand,         //held by player
     InInventory,    //in player's inventory
-    Attached        //attached to another object (e.g. EOT Lanterns)
+    Attached,       //attached to another object (e.g. EOT Lanterns)
+    OnCar           //resting on/in a train car (e.g. an item left in a loco cab)
 }
 
 public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
@@ -94,6 +95,15 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private Vector3 thrownPosition;
     private Quaternion thrownRotation;
     private Vector3 throwDirection;
+
+    //Track the car an item belongs to, so it can be synced relative to that car
+    private const float CAR_WAIT_TIMEOUT = 30f;
+    private const float CAR_WAIT_INTERVAL = 0.5f;
+    private TrainCar parentCar;
+    private Transform lastKnownParent;
+    private bool parentLookupDone;
+    private ushort lastCarNetId;
+    private Coroutine deferredOnCar;
 
     //Handle ownership
     public sbyte OwnerId { get; private set; } = -1; // 0 means no owner
@@ -299,10 +309,22 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (Item == null && Register() == false)
             return null;
 
-        if (!stateDirty && !hasDirtyVals)
+        //The game re-parents items without raising an event (e.g. an item put down in a loco cab),
+        //so a change of parent is treated as a possible state change.
+        bool parentChanged = RefreshParentCar();
+
+        if (!stateDirty && !hasDirtyVals && !parentChanged)
             return null;
 
         ItemState currentState = GetItemState();
+
+        //Items held by another player are deactivated for us, we must not report state for those
+        if (gameObject.activeInHierarchy &&
+            (currentState != lastState || (currentState == ItemState.OnCar && parentCar.GetNetId() != lastCarNetId)))
+            stateDirty = true;
+
+        if (!stateDirty && !hasDirtyVals)
+            return null;
 
         if (!createdDirty)
         {
@@ -325,6 +347,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return null;
 
         lastState = currentState;
+        lastCarNetId = currentState == ItemState.OnCar ? parentCar.GetNetId() : (ushort)0;
         LastDirtyTick = NetworkLifecycle.Instance.Tick;
         snapshot = CreateUpdateData(updateType);
 
@@ -354,6 +377,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void ApplySnapshot(ItemUpdateData snapshot)
     {
+        CancelDeferredOnCar();
+
         if (snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.ItemState) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.FullSync) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.Create))
         {
             Multiplayer.Log($"NetworkedItem.ApplySnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}, ItemState: {snapshot?.ItemState}, Active state: {gameObject.activeInHierarchy}");
@@ -372,6 +397,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
                 case ItemState.Attached:
                     HandleAttachedState(snapshot);
+                    break;
+
+                case ItemState.OnCar:
+                    HandleOnCarState(snapshot);
                     break;
 
                 default:
@@ -398,8 +427,21 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         createdDirty = false;
         stateDirty = false;
 
+        SyncStateTracking();
+
         MarkValuesClean();
         return;
+    }
+
+    /// <summary>
+    /// Aligns the locally tracked state with reality after applying a received snapshot,
+    /// so the change isn't detected as dirty and sent straight back out again.
+    /// </summary>
+    private void SyncStateTracking()
+    {
+        RefreshParentCar(true);
+        lastState = GetItemState();
+        lastCarNetId = lastState == ItemState.OnCar ? parentCar.GetNetId() : (ushort)0;
     }
 
     public ItemUpdateData CreateUpdateData(ItemUpdateData.ItemUpdateType updateType)
@@ -436,7 +478,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             states = GetDirtyStateData();
         }
 
-        if (lastState == ItemState.Attached)
+        ItemState itemState = lastState;
+
+        if (itemState == ItemState.Attached)
         {
             ItemSnapPointCoupler itemSnapPointCoupler = snappableItem.SnappedTo as ItemSnapPointCoupler;
 
@@ -446,13 +490,31 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
                 frontCoupler = itemSnapPointCoupler.IsFront;
             }
         }
+        else if (itemState == ItemState.OnCar)
+        {
+            RefreshParentCar();
+            carId = parentCar.GetNetId();
+
+            if (carId != 0)
+            {
+                //Send the pose relative to the car, the item moves with the car on the receiving side
+                position = parentCar.transform.InverseTransformPoint(transform.position);
+                rotation = Quaternion.Inverse(parentCar.transform.rotation) * transform.rotation;
+            }
+            else
+            {
+                //The car isn't networked (yet), fall back to a world position so the item isn't lost
+                Multiplayer.LogWarning($"NetworkedItem.CreateUpdateData({updateType}) NetId: {NetId}, name: {name}. Item is on a car without a netId, sending world position");
+                itemState = ItemState.Dropped;
+            }
+        }
 
         var updateData = new ItemUpdateData
         {
             UpdateType = updateType,
             ItemNetId = NetId,
             PrefabName = Item.InventorySpecs.ItemPrefabName,
-            ItemState = lastState,
+            ItemState = itemState,
             ItemPosition = position,
             ItemRotation = rotation,
             ThrowDirection = throwDirection,
@@ -466,6 +528,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private ItemState GetItemState()
     {
+        RefreshParentCar();
+
         //Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, Parent: {Item.transform.parent} WorldMover: {WorldMover.OriginShiftParent}, wasThrown: {wasThrown}, isGrabbed: {Item.IsGrabbed()} Inventory.Contains(): {Inventory.Instance.Contains(this.gameObject, false)} Storage.Contains: {StorageController.Instance.StorageInventory.ContainsItem(Item)}");
 
 
@@ -493,9 +557,53 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return ItemState.Attached;
         }
 
+        if (parentCar != null)
+        {
+            Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, on car {parentCar?.ID}");
+            return ItemState.OnCar;
+        }
+
         //do we need a condition to check if it's attached to something else (last attach vs current attach)?
         return ItemState.Dropped;
 
+    }
+
+    /// <summary>
+    /// Resolves the TrainCar an item is parented to. The hierarchy is only walked when the item's
+    /// parent actually changed, so this is cheap enough to call every tick.
+    /// </summary>
+    /// <param name="force">Re-resolve even if the parent didn't change.</param>
+    /// <returns>True if the item's parent changed since the last call.</returns>
+    private bool RefreshParentCar(bool force = false)
+    {
+        Transform currentParent = transform.parent;
+
+        if (parentLookupDone && currentParent == lastKnownParent)
+        {
+            if (!force)
+                return false;
+        }
+
+        bool changed = !parentLookupDone || currentParent != lastKnownParent;
+
+        lastKnownParent = currentParent;
+        parentLookupDone = true;
+        parentCar = null;
+
+        if (currentParent == null || currentParent == WorldMover.OriginShiftParent)
+            return changed;
+
+        //GetComponentInParent() skips inactive objects on this Unity version, so walk the hierarchy ourselves
+        for (Transform parent = currentParent; parent != null; parent = parent.parent)
+        {
+            if (parent.TryGetComponent(out TrainCar trainCar))
+            {
+                parentCar = trainCar;
+                break;
+            }
+        }
+
+        return changed;
     }
 
     private void ApplyTrackedValues(Dictionary<string, object> newValues)
@@ -552,6 +660,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(snapshot.Player, out ServerPlayer player) && player.OwnsItem(NetId))
                 player.RemoveOwnedItem(NetId);
 
+        //release the item from any car it was resting on
+        if (transform.parent != WorldMover.OriginShiftParent)
+            transform.SetParent(WorldMover.OriginShiftParent, true);
+
         //activate and relocate item
         gameObject.SetActive(true);
         transform.position = snapshot.ItemPosition + WorldMover.currentMove;
@@ -607,6 +719,77 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         }
     }
 
+    private void HandleOnCarState(ItemUpdateData snapshot)
+    {
+        //resolve attachment
+        if (Item.IsSnapped)
+        {
+            Item.SnappableItem.SnappedTo.UnsnapItem(false);
+        }
+
+        //resolve ownership
+        if (NetworkLifecycle.Instance.IsHost())
+            if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(snapshot.Player, out ServerPlayer player) && player.OwnsItem(NetId))
+                player.RemoveOwnedItem(NetId);
+
+        OwnerId = 0;
+
+        if (!NetworkedTrainCar.TryGet(snapshot.CarNetId, out TrainCar trainCar) || trainCar == null)
+        {
+            //The car may not have spawned yet (e.g. joining, or the trainset is still streaming in)
+            Multiplayer.LogDebug(() => $"NetworkedItem.HandleOnCarState() ItemNetId: {snapshot?.ItemNetId}. Car {snapshot?.CarNetId} not found, deferring");
+            deferredOnCar = CoroutineManager.Instance.StartCoroutine(WaitForCar(snapshot));
+            return;
+        }
+
+        ApplyOnCarState(snapshot, trainCar);
+    }
+
+    private void ApplyOnCarState(ItemUpdateData snapshot, TrainCar trainCar)
+    {
+        Multiplayer.LogDebug(() => $"NetworkedItem.ApplyOnCarState() ItemNetId: {snapshot?.ItemNetId}, car: [{trainCar?.ID}, {snapshot?.CarNetId}], local position: {snapshot?.ItemPosition}");
+
+        gameObject.SetActive(true);
+
+        //parent to the car so the item moves with it, the pose is relative to the car
+        transform.SetParent(trainCar.transform, false);
+        transform.localPosition = snapshot.ItemPosition;
+        transform.localRotation = snapshot.ItemRotation;
+    }
+
+    private IEnumerator WaitForCar(ItemUpdateData snapshot)
+    {
+        float startTime = Time.time;
+
+        while (Time.time - startTime < CAR_WAIT_TIMEOUT)
+        {
+            yield return new WaitForSeconds(CAR_WAIT_INTERVAL);
+
+            if (this == null)
+                yield break;
+
+            if (NetworkedTrainCar.TryGet(snapshot.CarNetId, out TrainCar trainCar) && trainCar != null)
+            {
+                deferredOnCar = null;
+                ApplyOnCarState(snapshot, trainCar);
+                SyncStateTracking();
+                yield break;
+            }
+        }
+
+        deferredOnCar = null;
+        Multiplayer.LogWarning($"NetworkedItem.WaitForCar() ItemNetId: {NetId}, name: {name}. Car {snapshot.CarNetId} did not appear, item left where it is");
+    }
+
+    private void CancelDeferredOnCar()
+    {
+        if (deferredOnCar == null)
+            return;
+
+        CoroutineManager.Instance?.Stop(deferredOnCar);
+        deferredOnCar = null;
+    }
+
     private void HandleInventoryOrHandState(ItemUpdateData snapshot)
     {
         if (Item.IsSnapped)
@@ -627,6 +810,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     {
         if (UnloadWatcher.isQuitting)
             return;
+
+        CancelDeferredOnCar();
 
         if (UnloadWatcher.isUnloading)
         {

@@ -65,6 +65,13 @@ public class ItemUpdateData
                 writer.Put(CarNetId);
                 writer.Put(AttachedFront);
             }
+            else if (ItemState == ItemState.OnCar)
+            {
+                //position and rotation are relative to the car
+                writer.Put(CarNetId);
+                Vector3Serializer.Serialize(writer, ItemPosition);
+                QuaternionSerializer.Serialize(writer, ItemRotation);
+            }
         }
 
         if (UpdateType.HasFlag(ItemUpdateType.Create) || UpdateType.HasFlag(ItemUpdateType.ObjectState))
@@ -118,6 +125,13 @@ public class ItemUpdateData
             {
                 CarNetId = reader.GetUShort();
                 AttachedFront = reader.GetBool();
+            }
+            else if (ItemState == ItemState.OnCar)
+            {
+                //position and rotation are relative to the car
+                CarNetId = reader.GetUShort();
+                ItemPosition = Vector3Serializer.Deserialize(reader);
+                ItemRotation = QuaternionSerializer.Deserialize(reader);
             }
         }
 
