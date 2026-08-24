@@ -236,12 +236,33 @@ public static class NetworkedGadgets
             return;
         }
 
-        //Link() throws outright on a gadget that is still attached somewhere, which happened whenever
-        //a stale attachment had not been taken down here yet
+        //Link() throws outright on a gadget that is still attached somewhere
         if (gadgetItem.Gadget.IsLinked)
         {
-            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) is already attached, taking it down first");
-            gadgetItem.Gadget.ForceRemove(false);
+            //Already on the car this packet names: the world is in the requested shape and only the
+            //identity and the data need to catch up. Taking it down first would be busywork, and
+            //Remove() throws on an item whose reparenting component has gone.
+            if (gadgetItem.Gadget.Custom == customization)
+            {
+                AssignNetworkUid(gadgetItem.Gadget, packet.Uid);
+                ApplyState(gadgetItem.Gadget, packet.State);
+
+                Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {netItem.Item.name} was already on car {packet.CarNetId}, adopted uid {packet.Uid}");
+
+                return;
+            }
+
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) is attached elsewhere, taking it down first");
+
+            try
+            {
+                gadgetItem.Gadget.ForceRemove(false);
+            }
+            catch (Exception e)
+            {
+                Multiplayer.LogError($"NetworkedGadgets.ApplyAttached() could not take down item {packet.ItemNetId}: {e.Message}");
+                return;
+            }
         }
 
         //Link() mints a fresh UID from the local counter whenever it finds none, which would both
