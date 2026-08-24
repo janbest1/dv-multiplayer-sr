@@ -151,8 +151,10 @@ public class NetworkClient : NetworkManager
         base.Stop();
     }
 
-    private void OnSettingsUpdated(Settings settings)
+    public override void OnSettingsUpdated(Settings settings)
     {
+        base.OnSettingsUpdated(settings);
+
         Dictionary<PlayerPreference, string> preferences = [];
 
         if (settings.CharacterId != characterModelId)

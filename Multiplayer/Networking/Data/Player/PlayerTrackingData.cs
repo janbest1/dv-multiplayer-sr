@@ -38,7 +38,7 @@ public struct PlayerTrackingData
         RightFootRotation = 65536,
     }
 
-    private DataFlags Flags
+    private readonly DataFlags Flags
     {
         get
         {
@@ -72,7 +72,7 @@ public struct PlayerTrackingData
         }
     }
 
-    public bool HasAdditionalData =>
+    public readonly bool HasAdditionalData =>
         LeftHandPosition.HasValue ||
         LeftHandRotation.HasValue ||
         LeftHandOpen.HasValue ||
@@ -176,7 +176,7 @@ public struct PlayerTrackingData
     }
 
     /// <summary>Merges non-null fields from <paramref name="delta"/> into this instance.</summary>
-    public PlayerTrackingData MergeFrom(PlayerTrackingData delta)
+    public readonly PlayerTrackingData MergeFrom(PlayerTrackingData delta)
     {
         return new PlayerTrackingData
         {
