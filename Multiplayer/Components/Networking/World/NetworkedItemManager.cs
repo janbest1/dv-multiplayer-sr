@@ -236,6 +236,11 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
         foreach (var item in NetworkedItem.GetAll())
         {
+            //Its gadget speaks for it now. Snapshotting it anyway reported it as lying on the floor
+            //where it was picked up, and the other side put a copy of it back there.
+            if (NetworkedGadgets.IsInstalledGadget(item.Item))
+                continue;
+
             ItemUpdateData snapshot = item.GetSnapshot();
             if (snapshot != null)
                 dirtyItems.Add(snapshot);
@@ -254,6 +259,11 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             // Process nearby items
             foreach (var nearbyItem in player.NearbyItems.Keys)
             {
+                //NearbyItems only drops an item after NEARBY_REMOVAL_DELAY, which left three seconds
+                //of stale updates going out for something that had just been bolted onto a car
+                if (NetworkedGadgets.IsInstalledGadget(nearbyItem.Item))
+                    continue;
+
                 if (!player.KnownItems.ContainsKey(nearbyItem))
                 {
                     // This is a new item for the player
