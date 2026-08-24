@@ -215,6 +215,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private void OnGrabbed(ControlImplBase obj)
     {
         //Multiplayer.LogDebug(() => $"NetworkedItem.OnGrabbed() NetID: {NetId}, {name}");
+
+        //An item riding on a car has its physics switched off, grabbing it puts them back
+        SetRidingPhysics(false);
+
         stateDirty = true;
     }
 
@@ -753,6 +757,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (transform.parent != WorldMover.OriginShiftParent)
             transform.SetParent(WorldMover.OriginShiftParent, true);
 
+        //It may have been parked while it rode along on a car
+        SetRidingPhysics(false);
+
         //activate and relocate item
         gameObject.SetActive(true);
         transform.position = snapshot.ItemPosition + WorldMover.currentMove;
@@ -801,7 +808,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         }
 
         //Attempt attachment to car
-        Item.ItemRigidbody.isKinematic = false;
+        SetRidingPhysics(false);
         if (!snapPoint.SnapItem(Item, false))
         {
             Multiplayer.LogWarning($"NetworkedItem.HandleAttachedState() Attachment failed for item {snapshot?.ItemNetId} to car {snapshot.CarNetId}");
@@ -844,6 +851,33 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         transform.SetParent(trainCar.transform, false);
         transform.localPosition = snapshot.ItemPosition;
         transform.localRotation = snapshot.ItemRotation;
+
+        //Has to come after the pose, a simulated rigidbody would immediately overwrite it
+        SetRidingPhysics(true);
+    }
+
+    /// <summary>
+    /// Parks or wakes the item's rigidbody. A simulated rigidbody is moved by the physics engine
+    /// in world space and ignores its parent, so an item resting on a car would be left behind the
+    /// moment the car starts moving. Items we only mirror for another player are held in place by
+    /// the parent instead.
+    /// </summary>
+    private void SetRidingPhysics(bool riding)
+    {
+        Rigidbody itemRigidbody = Item?.ItemRigidbody;
+
+        if (itemRigidbody == null || itemRigidbody.isKinematic == riding)
+            return;
+
+        if (riding)
+        {
+            itemRigidbody.velocity = Vector3.zero;
+            itemRigidbody.angularVelocity = Vector3.zero;
+        }
+
+        itemRigidbody.isKinematic = riding;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.SetRidingPhysics({riding}) NetId: {NetId}, name: {name}");
     }
 
     private IEnumerator WaitForCar(ItemUpdateData snapshot)
@@ -885,6 +919,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         {
             Item.SnappableItem.SnappedTo.UnsnapItem(false);
         }
+
+        //It may have been parked while it rode along on a car
+        SetRidingPhysics(false);
 
         if (NetworkLifecycle.Instance.IsHost())
             if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(snapshot.Player, out ServerPlayer player) && !player.OwnsItem(NetId))
