@@ -285,7 +285,7 @@ public static class NetworkedGadgets
 
         if (!NetworkedItem.TryGet(packet.ItemNetId, out NetworkedItem netItem) || netItem.Item == null)
         {
-            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} not found for car {packet.CarNetId}");
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({packet.PrefabName}) not found for car {packet.CarNetId}");
             return;
         }
 

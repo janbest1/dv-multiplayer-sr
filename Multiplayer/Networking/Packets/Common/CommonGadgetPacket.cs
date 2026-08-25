@@ -22,6 +22,9 @@ public class CommonGadgetPacket : INetSerializable
     /// <summary>Item the gadget was placed from. Only meaningful for <see cref="GadgetAction.Attached"/>.</summary>
     public ushort ItemNetId { get; set; }
 
+    /// <summary>Which gadget this is, for reporting when the item cannot be resolved.</summary>
+    public string PrefabName { get; set; }
+
     public Vector3 LocalPosition { get; set; }
     public Quaternion LocalRotation { get; set; }
 
@@ -44,6 +47,7 @@ public class CommonGadgetPacket : INetSerializable
         {
             case GadgetAction.Attached:
                 writer.Put(ItemNetId);
+                writer.Put(PrefabName ?? string.Empty);
                 Vector3Serializer.Serialize(writer, LocalPosition);
                 QuaternionSerializer.Serialize(writer, LocalRotation);
                 writer.Put(State ?? string.Empty);
@@ -74,6 +78,7 @@ public class CommonGadgetPacket : INetSerializable
         {
             case GadgetAction.Attached:
                 ItemNetId = reader.GetUShort();
+                PrefabName = reader.GetString();
                 LocalPosition = Vector3Serializer.Deserialize(reader);
                 LocalRotation = QuaternionSerializer.Deserialize(reader);
                 State = reader.GetString();

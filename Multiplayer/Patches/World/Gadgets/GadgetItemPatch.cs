@@ -26,9 +26,11 @@ public static class GadgetItemPatch
         if (!NetworkedGadgets.TryGetCarNetId(destination, out ushort carNetId))
             return;
 
-        if (!NetworkedItem.TryGetNetId(gadgetItem.Item, out ushort itemNetId))
+        //Without a net id nobody else can tell which item this is, and the attach would arrive as
+        //"item 0 not found". Most items a client brings along have no id at all yet.
+        if (!NetworkedItem.TryGetNetId(gadgetItem.Item, out ushort itemNetId) || itemNetId == 0)
         {
-            Multiplayer.LogWarning($"GadgetItemPatch.Place() {gadgetItem.name} placed on car {carNetId}, but the item is not networked");
+            Multiplayer.LogWarning($"GadgetItemPatch.Place() {gadgetItem.Item?.name} placed on car {carNetId}, but the item has no network id, so the attach cannot be shared");
             return;
         }
 
@@ -44,6 +46,7 @@ public static class GadgetItemPatch
             CarNetId = carNetId,
             Uid = __result.UID,
             ItemNetId = itemNetId,
+            PrefabName = gadgetItem.Item?.name,
             LocalPosition = localPos,
             LocalRotation = localRot,
             State = NetworkedGadgets.SerialiseState(__result)
