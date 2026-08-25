@@ -503,31 +503,50 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     }
 
     /// <summary>
-    /// Host side: makes its own copy of an item a client asked about, which takes a fresh net id as
-    /// it wakes up, and hands that id back.
+    /// Host side: sets aside an id for an item a client is holding. Nothing is built here. Making a
+    /// copy of the item just to get a number out of it left that copy lying in the host's world as
+    /// a spare part; whoever needs one makes it when the time comes, and gives it this id.
     /// </summary>
     public ushort RegisterItemForClient(string prefabName)
     {
-        if (string.IsNullOrEmpty(prefabName) || !ItemPrefabs.TryGetValue(prefabName, out InventoryItemSpec spec))
+        if (string.IsNullOrEmpty(prefabName) || !ItemPrefabs.ContainsKey(prefabName))
         {
             Multiplayer.LogWarning($"NetworkedItemManager.RegisterItemForClient() no prefab named \"{prefabName}\"");
             return 0;
         }
 
-        //The item cache only exists on clients, so this always makes a fresh one. Its NetworkedItem
-        //takes an id as it wakes up, because on the host IdMonoBehaviour hands them out.
-        GameObject gameObject = Instantiate(spec.gameObject, WorldMover.OriginShiftParent.position, Quaternion.identity);
-        NetworkedItem newItem = gameObject.GetOrAddComponent<NetworkedItem>();
+        ushort netId = NetworkedItem.ReserveId();
 
-        if (newItem.NetId == 0)
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.RegisterItemForClient() {prefabName} reserved item id {netId}");
+
+        return netId;
+    }
+
+    /// <summary>
+    /// Builds an item that only exists on another machine so far, under the id everyone agreed on.
+    /// </summary>
+    public NetworkedItem CreateItemFromPrefab(string prefabName, ushort netId)
+    {
+        if (netId == 0 || string.IsNullOrEmpty(prefabName) || !ItemPrefabs.TryGetValue(prefabName, out InventoryItemSpec spec))
         {
-            Multiplayer.LogWarning($"NetworkedItemManager.RegisterItemForClient() {prefabName} came up without an id");
-            return 0;
+            Multiplayer.LogWarning($"NetworkedItemManager.CreateItemFromPrefab() cannot make \"{prefabName}\" as item {netId}");
+            return null;
         }
 
-        Multiplayer.LogDebug(() => $"NetworkedItemManager.RegisterItemForClient() {prefabName} registered as item {newItem.NetId}");
+        NetworkedItem newItem = GetFromCache(prefabName);
 
-        return newItem.NetId;
+        if (newItem == null)
+        {
+            GameObject gameObject = Instantiate(spec.gameObject, WorldMover.OriginShiftParent.position, Quaternion.identity);
+            newItem = gameObject.GetOrAddComponent<NetworkedItem>();
+        }
+
+        newItem.gameObject.SetActive(true);
+        newItem.NetId = netId;
+
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.CreateItemFromPrefab() made {prefabName} as item {netId}");
+
+        return newItem;
     }
 
     #endregion

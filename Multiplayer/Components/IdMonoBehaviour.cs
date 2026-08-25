@@ -27,6 +27,15 @@ public abstract class IdMonoBehaviour<T, I> : MonoBehaviour where T : struct whe
 
     protected abstract bool IsIdServerAuthoritative { get; }
 
+    /// <summary>
+    /// Takes an id out of the pool without anything to attach it to yet. The host needs this to
+    /// answer a client asking for an id before either side has made the object it will belong to.
+    /// </summary>
+    public static T ReserveId()
+    {
+        return idPool.NextId;
+    }
+
     protected static bool Get(T netId, out IdMonoBehaviour<T, I> obj)
     {
         if (indexToObject.TryGetValue(netId, out obj))

@@ -308,8 +308,15 @@ public static class NetworkedGadgets
 
         if (!NetworkedItem.TryGet(packet.ItemNetId, out NetworkedItem netItem) || netItem.Item == null)
         {
-            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({packet.PrefabName}) not found for car {packet.CarNetId}");
-            return;
+            //The id was set aside for an item only the sender has. Build it here now that it is
+            //needed, rather than having made a spare copy back when the id was handed out.
+            netItem = NetworkedItemManager.Instance.CreateItemFromPrefab(packet.PrefabName, packet.ItemNetId);
+
+            if (netItem == null || netItem.Item == null)
+            {
+                Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({packet.PrefabName}) not found for car {packet.CarNetId}");
+                return;
+            }
         }
 
         GadgetItem gadgetItem = netItem.Item.GetComponent<GadgetItem>();
