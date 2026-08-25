@@ -1,6 +1,7 @@
 using DV.CabControls;
 using DV.Customization;
 using DV.Customization.Gadgets;
+using Multiplayer.Components.Networking.Player;
 using Multiplayer.Components.Networking.Train;
 using Multiplayer.Networking.Data.Gadgets;
 using Multiplayer.Networking.Packets.Common;
@@ -9,6 +10,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace Multiplayer.Components.Networking.World;
 
@@ -331,6 +333,11 @@ public static class NetworkedGadgets
             }
         }
 
+        //Whoever placed this was holding the item, and the last item update before the attach said so.
+        //A remote player's hand is driven every frame from NetworkedPlayer.Update, so the item would
+        //keep being dragged along beside the gadget for the rest of the session.
+        ReleaseFromRemoteHands(netItem.Item.gameObject);
+
         //Link() mints a fresh UID from the local counter whenever it finds none, which would both
         //burn a number here and leave the gadget under the wrong id until the state lands
         AssignNetworkUid(gadgetItem.Gadget, packet.Uid);
@@ -348,6 +355,26 @@ public static class NetworkedGadgets
         Track(gadget);
 
         Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {netItem.Item.name} on car {packet.CarNetId}, uid: {gadget.UID}");
+    }
+
+    /// <summary>
+    /// Makes any player shown holding this item let go of it, so nothing keeps moving it about once
+    /// it has become a gadget on a car.
+    /// </summary>
+    private static void ReleaseFromRemoteHands(GameObject itemGo)
+    {
+        if (itemGo == null)
+            return;
+
+        foreach (NetworkedPlayer player in UnityEngine.Object.FindObjectsOfType<NetworkedPlayer>())
+        {
+            if (player == null || player.RightHandItemGO != itemGo)
+                continue;
+
+            Multiplayer.LogDebug(() => $"NetworkedGadgets.ReleaseFromRemoteHands() {player.name} was shown holding {itemGo.name}");
+
+            player.DropItem();
+        }
     }
 
     private static void ApplyStatePacket(CommonGadgetPacket packet)
