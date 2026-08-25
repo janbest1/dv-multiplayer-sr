@@ -253,6 +253,7 @@ public class NetworkClient : NetworkManager
         netPacketProcessor.SubscribeReusable<CommonGenericSwitchStatePacket>(OnCommonGenericSwitchStatePacket);
         netPacketProcessor.SubscribeNetSerializable<CommonGadgetPacket>(OnCommonGadgetPacket);
         netPacketProcessor.SubscribeReusable<CommonItemStorePacket>(OnCommonItemStorePacket);
+        netPacketProcessor.SubscribeReusable<ClientboundItemRegisteredPacket>(OnClientboundItemRegisteredPacket);
 
         netPacketProcessor.SubscribeReusable<CommonChatPacket>(OnCommonChatPacket);
     }
@@ -1342,6 +1343,13 @@ public class NetworkClient : NetworkManager
         NetworkedItemManager.Instance.ReceiveSnapshots(packet.Items, null);
     }
 
+    private void OnClientboundItemRegisteredPacket(ClientboundItemRegisteredPacket packet)
+    {
+        LogDebug(() => $"OnClientboundItemRegisteredPacket() request: {packet?.RequestId}, item: {packet?.ItemNetId}");
+
+        NetworkedItemManager.Instance.NetIdAssigned(packet.RequestId, packet.ItemNetId);
+    }
+
     private void OnCommonItemStorePacket(CommonItemStorePacket packet)
     {
         LogDebug(() => $"OnCommonItemStorePacket() item: {packet?.ItemNetId}, player: {packet?.PlayerId}, stored: {packet?.Stored}");
@@ -1913,6 +1921,17 @@ public class NetworkClient : NetworkManager
 
         SendNetSerializablePacketToServer(new CommonItemChangePacket { Items = items },
                 DeliveryMethod.ReliableOrdered);
+    }
+
+    public void SendItemRegisterRequest(uint requestId, string prefabName)
+    {
+        LogDebug(() => $"SendItemRegisterRequest({requestId}, {prefabName})");
+
+        SendPacketToServer(new ServerboundItemRegisterPacket
+        {
+            RequestId = requestId,
+            PrefabName = prefabName
+        }, DeliveryMethod.ReliableOrdered);
     }
 
     public void SendItemRetrieved(ushort itemNetId, byte playerId)

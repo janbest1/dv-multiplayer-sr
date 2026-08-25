@@ -445,6 +445,93 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     }
     #endregion
 
+    #region Net id registration
+
+    //Net ids are the host's to hand out: IdMonoBehaviour.Awake only takes one when it is running on
+    //the host, so anything a client brings into the world itself - bought, loaded from its own save,
+    //taken back out of the item cache - carries no id and cannot be spoken about over the network.
+    //A client asks for one here and adopts what comes back onto the item it already has.
+    private static uint nextRegisterRequestId = 1;
+
+    private readonly Dictionary<uint, (NetworkedItem Item, Action<ushort> OnAssigned)> pendingRegistrations = new();
+
+    /// <summary>
+    /// Asks the host for a net id for an item this client made, and reports back once it arrives.
+    /// </summary>
+    public void RequestNetId(NetworkedItem netItem, Action<ushort> onAssigned)
+    {
+        string prefabName = netItem?.Item?.InventorySpecs?.ItemPrefabName;
+
+        if (netItem == null || string.IsNullOrEmpty(prefabName))
+        {
+            Multiplayer.LogWarning($"NetworkedItemManager.RequestNetId() {netItem?.name} has no prefab name to ask with");
+            return;
+        }
+
+        uint requestId = nextRegisterRequestId++;
+        pendingRegistrations[requestId] = (netItem, onAssigned);
+
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.RequestNetId() asking for {prefabName}, request {requestId}");
+
+        NetworkLifecycle.Instance.Client.SendItemRegisterRequest(requestId, prefabName);
+    }
+
+    /// <summary>
+    /// Takes the id the host handed out and puts it on the item that asked for it.
+    /// </summary>
+    public void NetIdAssigned(uint requestId, ushort netId)
+    {
+        if (!pendingRegistrations.TryGetValue(requestId, out var pending))
+        {
+            Multiplayer.LogWarning($"NetworkedItemManager.NetIdAssigned() no item waiting on request {requestId}");
+            return;
+        }
+
+        pendingRegistrations.Remove(requestId);
+
+        if (netId == 0 || pending.Item == null)
+        {
+            Multiplayer.LogWarning($"NetworkedItemManager.NetIdAssigned() request {requestId} came back empty");
+            return;
+        }
+
+        pending.Item.NetId = netId;
+
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.NetIdAssigned() {pending.Item.name} is now item {netId}");
+
+        pending.OnAssigned?.Invoke(netId);
+    }
+
+    /// <summary>
+    /// Host side: makes its own copy of an item a client asked about, which takes a fresh net id as
+    /// it wakes up, and hands that id back.
+    /// </summary>
+    public ushort RegisterItemForClient(string prefabName)
+    {
+        if (string.IsNullOrEmpty(prefabName) || !ItemPrefabs.TryGetValue(prefabName, out InventoryItemSpec spec))
+        {
+            Multiplayer.LogWarning($"NetworkedItemManager.RegisterItemForClient() no prefab named \"{prefabName}\"");
+            return 0;
+        }
+
+        //The item cache only exists on clients, so this always makes a fresh one. Its NetworkedItem
+        //takes an id as it wakes up, because on the host IdMonoBehaviour hands them out.
+        GameObject gameObject = Instantiate(spec.gameObject, WorldMover.OriginShiftParent.position, Quaternion.identity);
+        NetworkedItem newItem = gameObject.GetOrAddComponent<NetworkedItem>();
+
+        if (newItem.NetId == 0)
+        {
+            Multiplayer.LogWarning($"NetworkedItemManager.RegisterItemForClient() {prefabName} came up without an id");
+            return 0;
+        }
+
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.RegisterItemForClient() {prefabName} registered as item {newItem.NetId}");
+
+        return newItem.NetId;
+    }
+
+    #endregion
+
     #region Item Cache And Management
     private void CreateItem(ItemUpdateData snapshot)
     {

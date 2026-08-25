@@ -26,30 +26,50 @@ public static class GadgetItemPatch
         if (!NetworkedGadgets.TryGetCarNetId(destination, out ushort carNetId))
             return;
 
-        //Without a net id nobody else can tell which item this is, and the attach would arrive as
-        //"item 0 not found". Most items a client brings along have no id at all yet.
-        if (!NetworkedItem.TryGetNetId(gadgetItem.Item, out ushort itemNetId) || itemNetId == 0)
-        {
-            Multiplayer.LogWarning($"GadgetItemPatch.Place() {gadgetItem.Item?.name} placed on car {carNetId}, but the item has no network id, so the attach cannot be shared");
-            return;
-        }
-
         //Take the UID the game just handed out and replace it with one carrying this player's slice,
         //so the number cannot collide with one minted on another machine at the same moment
         NetworkedGadgets.AssignNetworkUid(__result, NetworkedGadgets.NextLocalUid());
 
         NetworkedGadgets.Track(__result);
 
+        GadgetBase gadget = __result;
+        string prefabName = gadgetItem.Item?.InventorySpecs?.ItemPrefabName;
+
+        //The attach names the item by its net id, and anything a client brought into the world
+        //itself has none. Ask the host for one and report the attach once it comes back.
+        if (!NetworkedItem.TryGetNetId(gadgetItem.Item, out ushort itemNetId) || itemNetId == 0)
+        {
+            if (!NetworkedItem.TryGetNetworkedItem(gadgetItem.Item, out NetworkedItem netItem))
+            {
+                Multiplayer.LogWarning($"GadgetItemPatch.Place() {prefabName} placed on car {carNetId} is not a networked item at all");
+                return;
+            }
+
+            Multiplayer.LogDebug(() => $"GadgetItemPatch.Place() {prefabName} has no net id yet, asking the host for one");
+
+            NetworkedItemManager.Instance.RequestNetId(netItem, assignedId => Send(gadget, carNetId, assignedId, prefabName, localPos, localRot));
+
+            return;
+        }
+
+        Send(gadget, carNetId, itemNetId, prefabName, localPos, localRot);
+    }
+
+    private static void Send(GadgetBase gadget, ushort carNetId, ushort itemNetId, string prefabName, Vector3 localPos, Quaternion localRot)
+    {
+        if (gadget == null || itemNetId == 0)
+            return;
+
         NetworkLifecycle.Instance.Client?.SendGadgetChange(new CommonGadgetPacket
         {
             Action = GadgetAction.Attached,
             CarNetId = carNetId,
-            Uid = __result.UID,
+            Uid = gadget.UID,
             ItemNetId = itemNetId,
-            PrefabName = gadgetItem.Item?.name,
+            PrefabName = prefabName,
             LocalPosition = localPos,
             LocalRotation = localRot,
-            State = NetworkedGadgets.SerialiseState(__result)
+            State = NetworkedGadgets.SerialiseState(gadget)
         });
     }
 }

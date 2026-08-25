@@ -237,6 +237,7 @@ public class NetworkServer : NetworkManager
         // Gadgets
         netPacketProcessor.SubscribeNetSerializable<CommonGadgetPacket, ITransportPeer>(OnCommonGadgetPacket);
         netPacketProcessor.SubscribeReusable<CommonItemStorePacket, ITransportPeer>(OnCommonItemStorePacket);
+        netPacketProcessor.SubscribeReusable<ServerboundItemRegisterPacket, ITransportPeer>(OnServerboundItemRegisterPacket);
     }
 
     //allow mods to register their own packets
@@ -1590,6 +1591,22 @@ public class NetworkServer : NetworkManager
     private void OnCommonHandbrakePositionPacket(CommonHandbrakePositionPacket packet, ITransportPeer peer)
     {
         SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
+    }
+
+    private void OnServerboundItemRegisterPacket(ServerboundItemRegisterPacket packet, ITransportPeer peer)
+    {
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+            return;
+
+        ushort netId = NetworkedItemManager.Instance.RegisterItemForClient(packet.PrefabName);
+
+        Log($"Registered {packet.PrefabName} as item {netId} for {player.Username}");
+
+        SendPacket(player.Peer, new ClientboundItemRegisteredPacket
+        {
+            RequestId = packet.RequestId,
+            ItemNetId = netId
+        }, DeliveryMethod.ReliableOrdered);
     }
 
     private void OnCommonItemStorePacket(CommonItemStorePacket packet, ITransportPeer peer)
