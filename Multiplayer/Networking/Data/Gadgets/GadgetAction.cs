@@ -7,5 +7,6 @@ public enum GadgetAction : byte
 {
     Attached,           //placed onto a car, carries the position and the gadget's full state
     Detached,           //taken off again
-    MountPointState     //a screw point was drilled, taped or freed
+    MountPointState,    //a screw point was drilled, taped or freed
+    State               //the gadget's own data changed after it was placed
 }

@@ -57,6 +57,10 @@ public class CommonGadgetPacket : INetSerializable
                 writer.Put(MountPointIndex);
                 writer.Put(MountPointState);
                 break;
+
+            case GadgetAction.State:
+                writer.Put(State ?? string.Empty);
+                break;
         }
     }
 
@@ -82,6 +86,10 @@ public class CommonGadgetPacket : INetSerializable
             case GadgetAction.MountPointState:
                 MountPointIndex = reader.GetByte();
                 MountPointState = reader.GetByte();
+                break;
+
+            case GadgetAction.State:
+                State = reader.GetString();
                 break;
         }
     }

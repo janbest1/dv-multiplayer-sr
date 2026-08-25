@@ -130,6 +130,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     {
         ProcessReceived();
 
+        //Gadgets have no manager of their own and this is the world tick both sides already run
+        NetworkedGadgets.PollStates(tick);
+
         if (NetworkLifecycle.Instance.IsHost())
         {
             UpdatePlayerItemLists();

@@ -36,6 +36,8 @@ public static class GadgetItemPatch
         //so the number cannot collide with one minted on another machine at the same moment
         NetworkedGadgets.AssignNetworkUid(__result, NetworkedGadgets.NextLocalUid());
 
+        NetworkedGadgets.Track(__result);
+
         NetworkLifecycle.Instance.Client?.SendGadgetChange(new CommonGadgetPacket
         {
             Action = GadgetAction.Attached,

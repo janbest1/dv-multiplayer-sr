@@ -8,6 +8,7 @@ using Multiplayer.Utils;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
 
 namespace Multiplayer.Components.Networking.World;
 
@@ -80,6 +81,66 @@ public static class NetworkedGadgets
         GadgetItem gadgetItem = item.GetComponent<GadgetItem>();
 
         return gadgetItem != null && gadgetItem.Gadget != null && gadgetItem.Gadget.IsLinked;
+    }
+
+    //Everything a gadget knows about itself, from a lamp's power switch to which gadget sits on a
+    //mount, lives in the data it writes into a save. That data only travelled when the gadget was
+    //placed, so anything changed afterwards never reached the other side. Watch it for changes
+    //instead: one path covers every gadget type, including ones added to the game later.
+    private const int STATE_POLL_TICKS = 10;
+
+    private static readonly Dictionary<GadgetBase, string> trackedState = new Dictionary<GadgetBase, string>();
+    private static readonly List<GadgetBase> pollBuffer = new List<GadgetBase>();
+
+    /// <summary>
+    /// Starts watching a gadget's data, taking what it holds now as the agreed starting point.
+    /// </summary>
+    public static void Track(GadgetBase gadget)
+    {
+        if (gadget != null)
+            trackedState[gadget] = SerialiseState(gadget);
+    }
+
+    /// <summary>
+    /// Reports any watched gadget whose data no longer matches what everyone last agreed on.
+    /// </summary>
+    public static void PollStates(uint tick)
+    {
+        if (tick % STATE_POLL_TICKS != 0 || trackedState.Count == 0)
+            return;
+
+        pollBuffer.Clear();
+        pollBuffer.AddRange(trackedState.Keys);
+
+        foreach (GadgetBase gadget in pollBuffer)
+        {
+            //Taken off or destroyed: its removal has been reported through its own path
+            if (gadget == null || !gadget.IsLinked)
+            {
+                trackedState.Remove(gadget);
+                continue;
+            }
+
+            string current = SerialiseState(gadget);
+
+            if (current == trackedState[gadget])
+                continue;
+
+            trackedState[gadget] = current;
+
+            if (!TryGetCarNetId(gadget.Custom, out ushort carNetId))
+                continue;
+
+            Multiplayer.LogDebug(() => $"NetworkedGadgets.PollStates() uid {gadget.UID} on car {carNetId} changed");
+
+            NetworkLifecycle.Instance.Client?.SendGadgetChange(new CommonGadgetPacket
+            {
+                Action = GadgetAction.State,
+                CarNetId = carNetId,
+                Uid = gadget.UID,
+                State = current
+            });
+        }
     }
 
     public static bool TryGetCustomization(ushort carNetId, out TrainCarCustomization customization)
@@ -196,6 +257,10 @@ public static class NetworkedGadgets
                 case GadgetAction.MountPointState:
                     ApplyMountPointState(packet);
                     break;
+
+                case GadgetAction.State:
+                    ApplyStatePacket(packet);
+                    break;
             }
         }
         catch (Exception e)
@@ -246,6 +311,7 @@ public static class NetworkedGadgets
             {
                 AssignNetworkUid(gadgetItem.Gadget, packet.Uid);
                 ApplyState(gadgetItem.Gadget, packet.State);
+                Track(gadgetItem.Gadget);
 
                 Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {netItem.Item.name} was already on car {packet.CarNetId}, adopted uid {packet.Uid}");
 
@@ -279,8 +345,26 @@ public static class NetworkedGadgets
 
         //The state carries the placing instance's UID, which everyone has to agree on for wiring to resolve
         ApplyState(gadget, packet.State);
+        Track(gadget);
 
         Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {netItem.Item.name} on car {packet.CarNetId}, uid: {gadget.UID}");
+    }
+
+    private static void ApplyStatePacket(CommonGadgetPacket packet)
+    {
+        if (!TryGetGadget(packet.CarNetId, packet.Uid, out GadgetBase gadget))
+        {
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyStatePacket() gadget uid {packet.Uid} not found on car {packet.CarNetId}");
+            return;
+        }
+
+        ApplyState(gadget, packet.State);
+
+        //Agree on what was just applied, or the watcher would read it back as a local change and
+        //send it straight out again
+        trackedState[gadget] = SerialiseState(gadget);
+
+        Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyStatePacket() uid: {packet.Uid} on car {packet.CarNetId}");
     }
 
     private static void ApplyDetached(CommonGadgetPacket packet)
