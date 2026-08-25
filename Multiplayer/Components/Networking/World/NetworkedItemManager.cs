@@ -201,7 +201,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
                 //An item bolted onto a car is not lying in the world, it is the gadget now. Syncing it
                 //as a world item put a second copy of it wherever the player who placed it stood.
-                if (NetworkedGadgets.IsInstalledGadget(item.Item))
+                if (NetworkedGadgets.IsInstalledGadget(item.Item) || NetworkedItemStorage.IsStowed(item.Item))
                 {
                     if (player.NearbyItems.ContainsKey(item))
                         player.NearbyItems.Remove(item);
@@ -241,7 +241,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         {
             //Its gadget speaks for it now. Snapshotting it anyway reported it as lying on the floor
             //where it was picked up, and the other side put a copy of it back there.
-            if (NetworkedGadgets.IsInstalledGadget(item.Item))
+            if (NetworkedGadgets.IsInstalledGadget(item.Item) || NetworkedItemStorage.IsStowed(item.Item))
                 continue;
 
             ItemUpdateData snapshot = item.GetSnapshot();
@@ -264,7 +264,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             {
                 //NearbyItems only drops an item after NEARBY_REMOVAL_DELAY, which left three seconds
                 //of stale updates going out for something that had just been bolted onto a car
-                if (NetworkedGadgets.IsInstalledGadget(nearbyItem.Item))
+                if (NetworkedGadgets.IsInstalledGadget(nearbyItem.Item) || NetworkedItemStorage.IsStowed(nearbyItem.Item))
                     continue;
 
                 if (!player.KnownItems.ContainsKey(nearbyItem))

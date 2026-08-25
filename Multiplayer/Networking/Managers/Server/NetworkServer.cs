@@ -236,6 +236,7 @@ public class NetworkServer : NetworkManager
 
         // Gadgets
         netPacketProcessor.SubscribeNetSerializable<CommonGadgetPacket, ITransportPeer>(OnCommonGadgetPacket);
+        netPacketProcessor.SubscribeReusable<CommonItemStorePacket, ITransportPeer>(OnCommonItemStorePacket);
     }
 
     //allow mods to register their own packets
@@ -970,6 +971,18 @@ public class NetworkServer : NetworkManager
         );
     }
 
+    public void SendItemStored(ushort itemNetId, byte playerId, bool stored)
+    {
+        Log($"Sending item {itemNetId} {(stored ? "stored for" : "retrieved by")} player {playerId}");
+
+        SendPacketToAll(new CommonItemStorePacket
+        {
+            ItemNetId = itemNetId,
+            PlayerId = playerId,
+            Stored = stored
+        }, DeliveryMethod.ReliableOrdered, PlayerLoadingState.Complete, true);
+    }
+
     public void SendItemsChangePacket(List<ItemUpdateData> items, ServerPlayer player)
     {
         Log($"Sending SendItemsChangePacket with {items.Count()} items to {player.Username}");
@@ -1577,6 +1590,27 @@ public class NetworkServer : NetworkManager
     private void OnCommonHandbrakePositionPacket(CommonHandbrakePositionPacket packet, ITransportPeer peer)
     {
         SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.ReadyForTrainSets, peer);
+    }
+
+    private void OnCommonItemStorePacket(CommonItemStorePacket packet, ITransportPeer peer)
+    {
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+            return;
+
+        LogDebug(() => $"OnCommonItemStorePacket() item: {packet.ItemNetId} from {player.Username}, stored: {packet.Stored}");
+
+        //A player can only take something out of their own lost and found
+        if (!packet.Stored && packet.PlayerId != player.PlayerId)
+        {
+            LogWarning($"{player.Username} tried to retrieve item {packet.ItemNetId} belonging to player {packet.PlayerId}");
+            return;
+        }
+
+        if (!NetworkLifecycle.Instance.IsHost(player))
+            NetworkedItemStorage.Apply(packet);
+
+        //Plain packet, so the reflection-based path, not the INetSerializable one
+        SendPacketToAll(packet, DeliveryMethod.ReliableOrdered, PlayerLoadingState.Complete, peer, true);
     }
 
     private void OnCommonGadgetPacket(CommonGadgetPacket packet, ITransportPeer peer)

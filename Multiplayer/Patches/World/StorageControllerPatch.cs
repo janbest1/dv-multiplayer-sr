@@ -12,7 +12,7 @@ public static class StorageControllerPatch
 {
     [HarmonyPatch(nameof(StorageController.AddItemToLostAndFound))]
     [HarmonyPrefix]
-    static void AddItemToLostAndFound(StorageController __instance, ItemBase item)
+    static bool AddItemToLostAndFound(StorageController __instance, ItemBase item)
     {
 
         Multiplayer.LogDebug(() =>
@@ -20,12 +20,15 @@ public static class StorageControllerPatch
             NetworkedItem.TryGetNetworkedItem(item, out NetworkedItem netItem);
             return $"StorageController.AddItemToLostAndFound({item.name}) netId: {netItem?.NetId}\r\n{new System.Diagnostics.StackTrace()}";
         });
+
+        return NetworkedItemStorage.ShouldStoreLocally(item);
     }
 
     [HarmonyPatch(nameof(StorageController.RemoveItemFromLostAndFound))]
     [HarmonyPrefix]
     static void RemoveItemFromLostAndFound(StorageController __instance, ItemBase item)
     {
+        NetworkedItemStorage.ItemRetrieved(item);
 
         Multiplayer.LogDebug(() =>
         {

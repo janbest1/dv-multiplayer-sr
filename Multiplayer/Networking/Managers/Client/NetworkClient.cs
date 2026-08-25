@@ -252,6 +252,7 @@ public class NetworkClient : NetworkManager
         netPacketProcessor.SubscribeReusable<CommonCashRegisterWithModulesActionPacket>(OnCommonCashRegisterWithModulesActionPacket);
         netPacketProcessor.SubscribeReusable<CommonGenericSwitchStatePacket>(OnCommonGenericSwitchStatePacket);
         netPacketProcessor.SubscribeNetSerializable<CommonGadgetPacket>(OnCommonGadgetPacket);
+        netPacketProcessor.SubscribeReusable<CommonItemStorePacket>(OnCommonItemStorePacket);
 
         netPacketProcessor.SubscribeReusable<CommonChatPacket>(OnCommonChatPacket);
     }
@@ -1341,6 +1342,13 @@ public class NetworkClient : NetworkManager
         NetworkedItemManager.Instance.ReceiveSnapshots(packet.Items, null);
     }
 
+    private void OnCommonItemStorePacket(CommonItemStorePacket packet)
+    {
+        LogDebug(() => $"OnCommonItemStorePacket() item: {packet?.ItemNetId}, player: {packet?.PlayerId}, stored: {packet?.Stored}");
+
+        NetworkedItemStorage.Apply(packet);
+    }
+
     private void OnCommonGadgetPacket(CommonGadgetPacket packet)
     {
         LogDebug(() => $"OnCommonGadgetPacket() {packet?.Action}, car: {packet?.CarNetId}, uid: {packet?.Uid}");
@@ -1905,6 +1913,18 @@ public class NetworkClient : NetworkManager
 
         SendNetSerializablePacketToServer(new CommonItemChangePacket { Items = items },
                 DeliveryMethod.ReliableOrdered);
+    }
+
+    public void SendItemRetrieved(ushort itemNetId, byte playerId)
+    {
+        LogDebug(() => $"SendItemRetrieved({itemNetId}, {playerId})");
+
+        SendPacketToServer(new CommonItemStorePacket
+        {
+            ItemNetId = itemNetId,
+            PlayerId = playerId,
+            Stored = false
+        }, DeliveryMethod.ReliableOrdered);
     }
 
     public void SendGadgetChange(CommonGadgetPacket packet)
