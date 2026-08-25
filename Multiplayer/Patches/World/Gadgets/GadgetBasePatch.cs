@@ -17,6 +17,7 @@ public static class GadgetBasePatch
     {
         public ushort CarNetId;
         public int Uid;
+        public GadgetBase Gadget;
     }
 
     /// <summary>
@@ -36,8 +37,17 @@ public static class GadgetBasePatch
         if (!NetworkedGadgets.TryGetCarNetId(__instance.Custom, out ushort carNetId))
             return;
 
+        //Nobody else has been told this gadget is here, so there is nothing for them to take off.
+        //Happens when it goes back on and off again while its item is still waiting for a net id.
+        if (!NetworkedGadgets.WasAnnounced(__instance))
+        {
+            Multiplayer.LogDebug(() => $"GadgetBasePatch.Remove() uid {__instance.UID} was never announced, nothing to report");
+            return;
+        }
+
         __state.CarNetId = carNetId;
         __state.Uid = __instance.UID;
+        __state.Gadget = __instance;
     }
 
     /// <summary>
@@ -51,6 +61,8 @@ public static class GadgetBasePatch
     {
         if (__result == null || __state.CarNetId == 0)
             return;
+
+        NetworkedGadgets.ClearAnnounced(__state.Gadget);
 
         NetworkLifecycle.Instance.Client?.SendGadgetChange(new CommonGadgetPacket
         {

@@ -60,6 +60,17 @@ public static class GadgetItemPatch
         if (gadget == null || itemNetId == 0)
             return;
 
+        //The id may have taken a round trip to the host and back, and in that time the player can
+        //easily have taken the gadget off again. Announcing it now would attach it everywhere else
+        //for good, since the detach went out before this and found nothing to remove.
+        if (!gadget.IsLinked || !NetworkedGadgets.TryGetCarNetId(gadget.Custom, out ushort currentCar) || currentCar != carNetId)
+        {
+            Multiplayer.LogDebug(() => $"GadgetItemPatch.Send() {prefabName} is no longer on car {carNetId}, dropping the attach");
+            return;
+        }
+
+        NetworkedGadgets.MarkAnnounced(gadget);
+
         NetworkLifecycle.Instance.Client?.SendGadgetChange(new CommonGadgetPacket
         {
             Action = GadgetAction.Attached,

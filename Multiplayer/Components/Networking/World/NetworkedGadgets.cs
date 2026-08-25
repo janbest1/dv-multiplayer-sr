@@ -94,6 +94,29 @@ public static class NetworkedGadgets
     private static readonly Dictionary<GadgetBase, string> trackedState = new Dictionary<GadgetBase, string>();
     private static readonly List<GadgetBase> pollBuffer = new List<GadgetBase>();
 
+    //Placing can no longer report itself straight away: an item a client brought along has to be
+    //given a net id by the host first, and the player may well have taken the gadget off again
+    //before that comes back. Only a gadget whose attach actually went out has a detach worth
+    //sending, and only one that is still attached is worth announcing at all.
+    private static readonly HashSet<GadgetBase> announced = new HashSet<GadgetBase>();
+
+    public static void MarkAnnounced(GadgetBase gadget)
+    {
+        if (gadget != null)
+            announced.Add(gadget);
+    }
+
+    public static bool WasAnnounced(GadgetBase gadget)
+    {
+        return gadget != null && announced.Contains(gadget);
+    }
+
+    public static void ClearAnnounced(GadgetBase gadget)
+    {
+        if (gadget != null)
+            announced.Remove(gadget);
+    }
+
     /// <summary>
     /// Starts watching a gadget's data, taking what it holds now as the agreed starting point.
     /// </summary>
@@ -314,6 +337,7 @@ public static class NetworkedGadgets
                 AssignNetworkUid(gadgetItem.Gadget, packet.Uid);
                 ApplyState(gadgetItem.Gadget, packet.State);
                 Track(gadgetItem.Gadget);
+                MarkAnnounced(gadgetItem.Gadget);
 
                 Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {netItem.Item.name} was already on car {packet.CarNetId}, adopted uid {packet.Uid}");
 
@@ -353,6 +377,7 @@ public static class NetworkedGadgets
         //The state carries the placing instance's UID, which everyone has to agree on for wiring to resolve
         ApplyState(gadget, packet.State);
         Track(gadget);
+        MarkAnnounced(gadget);
 
         Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {netItem.Item.name} on car {packet.CarNetId}, uid: {gadget.UID}");
     }
@@ -401,6 +426,8 @@ public static class NetworkedGadgets
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyDetached() gadget uid {packet.Uid} not found on car {packet.CarNetId}");
             return;
         }
+
+        ClearAnnounced(gadget);
 
         gadget.ForceRemove(packet.ReparentToCar);
 
