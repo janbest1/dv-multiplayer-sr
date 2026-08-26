@@ -245,11 +245,22 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             {
                 if (!player.KnownItems.ContainsKey(nearbyItem))
                 {
+                    player.KnownItems[nearbyItem] = tick;
+
+                    //An item only becomes "nearby" for the player who threw it at the moment they
+                    //throw it - until then it was in their hands or their bag, and not in the world
+                    //at all. Introducing it back to them puts it wherever the host had it a moment
+                    //ago, which for something still in the air means back at the throwing hand.
+                    if (nearbyItem.LastReportedBy == player.PlayerId)
+                    {
+                        NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) Not introducing item {nearbyItem.NetId} back to {player.Username}, it came from them");
+                        continue;
+                    }
+
                     // This is a new item for the player
                     NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) New item for: {player.Username}, itemNetID{nearbyItem.NetId}");
 
                     ItemUpdateData snapshot = nearbyItem.CreateUpdateData(ItemUpdateData.ItemUpdateType.Create);
-                    player.KnownItems[nearbyItem] = tick;
 
                     //prevent propagation of creates for special items
                     if(!DoNotCreateItem(nearbyItem.GetType()))
@@ -344,7 +355,10 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
         //The host's own record, not the client's word for it
         if (NetworkedItem.TryGet(snapshot.ItemNetId, out NetworkedItem netItem) && netItem != null)
+        {
             netItem.AssignGuid(guid);
+            netItem.LastReportedBy = player.PlayerId;
+        }
 
         NetworkLifecycle.Instance.Server.LogDebug(() => $"NetworkedItemManager.AcceptPromisedItem() {player.Username} introduced {snapshot.PrefabName} as item {snapshot.ItemNetId} ({guid})");
 
@@ -384,6 +398,8 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             if (ValidatePlayerAction(snapshot, player)) //Ensure the player can do this
             {
                 NetworkLifecycle.Instance.Server.LogDebug(() => $"NetworkedItemManager.ProcessReceivedAsHost() ItemNetId: {snapshot.ItemNetId}, snapshot type: {snapshot.UpdateType}");
+
+                netItem.LastReportedBy = player.PlayerId;
                 netItem.ReceiveSnapshot(snapshot);
             }
             else

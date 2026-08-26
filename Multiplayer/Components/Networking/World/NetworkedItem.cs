@@ -116,6 +116,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     //Handle ownership
     public sbyte OwnerId { get; private set; } = -1; // 0 means no owner
 
+    /// <summary>
+    /// Host only: the player whose word this item's state last came from. They already know what
+    /// they told us, so anything the host would introduce back to them is at best redundant and at
+    /// worst a correction of the very thing they are doing.
+    /// </summary>
+    public byte LastReportedBy { get; set; }
+
     //public void SetOwner(ushort playerId)
     //{
     //    if (OwnerId != playerId)
