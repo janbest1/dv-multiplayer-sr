@@ -1031,6 +1031,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void HandleInventoryOrHandState(ItemUpdateData snapshot)
     {
+        Multiplayer.LogDebug(() => $"NetworkedItem.HandleInventoryOrHandState() NetId: {NetId}, name: {name}, state: {snapshot.ItemState}, player: {snapshot.Player}");
+
         //Remember who has it, unless the snapshot is talking about us
         if (snapshot.Player != 0 && snapshot.Player != (NetworkLifecycle.Instance.Client?.PlayerId ?? 0))
         {

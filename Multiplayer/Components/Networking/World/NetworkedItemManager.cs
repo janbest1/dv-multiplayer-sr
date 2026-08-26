@@ -284,7 +284,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
                     if (dirtyUpdate != null)
                     {
-                        Multiplayer.LogDebug(() => $"ProcessChanged({tick}) Update Type: {dirtyUpdate.UpdateType}, Item State: {dirtyUpdate.ItemState}");
+                        Multiplayer.LogDebug(() => $"ProcessChanged({tick}) Sending item {dirtyUpdate.ItemNetId} to {player.Username}, Update Type: {dirtyUpdate.UpdateType}, Item State: {dirtyUpdate.ItemState}, Player: {dirtyUpdate.Player}");
                         playerUpdates.Add(dirtyUpdate);
                         player.KnownItems[nearbyItem] = tick;
                     }
