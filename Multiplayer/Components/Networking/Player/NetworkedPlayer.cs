@@ -15,23 +15,41 @@ namespace Multiplayer.Components.Networking.Player;
 public class NetworkedPlayer : MonoBehaviour
 {
     #region Static Setup
-    private static Vector3 itemAnchorOffset = new(0.2f, 1.5f, 0.4f);
+
+    //Where the game holds an item, measured in the camera's own frame, and how high that camera
+    //sits above the player. Both are read off the local player once and then used to place every
+    //other player's items, so neither may depend on where this player happened to be looking.
+    private static Vector3 itemAnchorFromCamera = new(0.2f, -0.1f, 0.4f);
+    private static float itemAnchorCameraHeight = 1.6f;
 
     /// <summary>
-    /// Captures the standard offset position for held items relative to the player transform
-    /// for mapping to a NetworkedPlayer.
-    /// This must be called as soon as the world is loaded, before the local player moves or crouches.
+    /// Learns from the local player where a held item belongs, so the same pose can be given to
+    /// every other player's hands.
+    ///
+    /// The anchor rides in front of the camera, so that is where it has to be measured. Measuring
+    /// it against the player instead folded the look direction into the answer: two machines in the
+    /// same session came out 30cm apart in height and half a metre in depth, and each of them then
+    /// drew the other player's items at its own idea of where a hand is.
     /// </summary>
     public static void CaptureItemAnchorOffset()
     {
-        //todo: there's some minor inconsistency with return values and may be related to:
-        // - the direction/rotation of the camera
-        // - player loading status (maybe posistion hasn't settled yet)
-        if (!VRManager.IsVREnabled())
+        if (VRManager.IsVREnabled())
+            return;
+
+        Transform player = PlayerManager.PlayerTransform;
+        Camera camera = PlayerManager.ActiveCamera;
+        ItemPositionController controller = ItemPositionController.Instance;
+
+        if (player == null || camera == null || controller == null || controller.itemAnchor == null)
         {
-            itemAnchorOffset = PlayerManager.PlayerTransform.InverseTransformPoint(ItemPositionController.Instance.itemAnchor.position);
-            Multiplayer.LogDebug(() => $"NetworkedPlayer.CaptureItemAnchorOffset() itemAnchorOffset: {itemAnchorOffset}");
+            Multiplayer.LogWarning("NetworkedPlayer.CaptureItemAnchorOffset() Nothing to measure against, keeping the defaults");
+            return;
         }
+
+        itemAnchorFromCamera = camera.transform.InverseTransformPoint(controller.itemAnchor.position);
+        itemAnchorCameraHeight = player.InverseTransformPoint(camera.transform.position).y;
+
+        Multiplayer.LogDebug(() => $"NetworkedPlayer.CaptureItemAnchorOffset() anchor from camera: {itemAnchorFromCamera}, camera height: {itemAnchorCameraHeight}");
     }
     #endregion
 
@@ -388,8 +406,14 @@ public class NetworkedPlayer : MonoBehaviour
         if (RightHandItemGO == null)
             return;
 
-        RightHandItemGO.transform.position = selfTransform.position + GetItemOffsetFromPlayer();
-        RightHandItemGO.transform.rotation = selfTransform.rotation * (itemHoldRot ?? Quaternion.identity);//ItemPositionController.Instance.itemAnchor.localRotation);
+        //An item is held in front of the eyes, so it follows where the player is looking - and the
+        //grab anchor the item carries is written in that same frame, which is why it has to be
+        //applied there rather than against the player's feet.
+        Quaternion look = selfTransform.rotation * Quaternion.Euler(currentHeadPitch, 0f, 0f);
+        Vector3 eye = selfTransform.position + selfTransform.up * itemAnchorCameraHeight;
+
+        RightHandItemGO.transform.position = eye + look * (itemAnchorFromCamera + (itemHoldPos ?? Vector3.zero));
+        RightHandItemGO.transform.rotation = look * (itemHoldRot ?? Quaternion.identity);
     }
 
     /// <summary>
@@ -678,10 +702,4 @@ public class NetworkedPlayer : MonoBehaviour
         itemHoldRot = null;
     }
 
-    private Vector3 GetItemOffsetFromPlayer()
-    {
-        Vector3 baseOffset = itemAnchorOffset;
-        Vector3 finalOffset = itemHoldPos.HasValue ? baseOffset + itemHoldPos.Value : baseOffset;
-        return selfTransform.TransformDirection(finalOffset);
-    }
 }
