@@ -377,6 +377,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         {
             promisedToPlayer.Remove(netId);
             promisedGuid.Remove(netId);
+
+            //Nothing is ever going to answer to it now
+            NetworkedItem.ReturnReservedId(netId);
         }
 
         //Player ids are handed out again, so a rejoining player usually gets their old one back. An

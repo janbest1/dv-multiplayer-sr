@@ -19,10 +19,31 @@ public abstract class IdMonoBehaviour<T, I> : MonoBehaviour where T : struct whe
         set {
             if (_netId.Equals(value))
                 return;
-            if ((_netId as dynamic).CompareTo(default(T)) != 0)
-                idPool.ReleaseId(_netId);
+
+            Surrender();
             Register(value);
         }
+    }
+
+    /// <summary>
+    /// Gives up the id this object currently answers to.
+    ///
+    /// Everything the host makes takes an id in Awake, and most of it is renamed a moment later to
+    /// the id that actually belongs to it - an item the host builds on a client's word, say. Without
+    /// clearing the lookup first, the old id goes back into the pool while still pointing here: the
+    /// next object to be built is handed the very same id, and so is the next, and the entry ends up
+    /// naming something else entirely. Whoever is later given that id then finds it already taken.
+    /// </summary>
+    private void Surrender()
+    {
+        if ((_netId as dynamic).CompareTo(default(T)) == 0)
+            return;
+
+        //Only if the id still names us - a later object may already have claimed it
+        if (indexToObject.TryGetValue(_netId, out IdMonoBehaviour<T, I> current) && ReferenceEquals(current, this))
+            indexToObject.Remove(_netId);
+
+        idPool.ReleaseId(_netId);
     }
 
     protected abstract bool IsIdServerAuthoritative { get; }
@@ -63,6 +84,17 @@ public abstract class IdMonoBehaviour<T, I> : MonoBehaviour where T : struct whe
         return idPool.NextId;
     }
 
+    /// <summary>
+    /// Puts a reserved id back when the thing it was meant for never turned up.
+    /// </summary>
+    public static void ReturnReservedId(T id)
+    {
+        if ((id as dynamic).CompareTo(default(T)) == 0 || indexToObject.ContainsKey(id))
+            return;
+
+        idPool.ReleaseId(id);
+    }
+
     public void Register(T id)
     {
         _netId = id;
@@ -71,7 +103,7 @@ public abstract class IdMonoBehaviour<T, I> : MonoBehaviour where T : struct whe
 
     protected virtual void OnDestroy()
     {
-        idPool.ReleaseId(NetId);
+        Surrender();
         if (!UnloadWatcher.isUnloading)
             return;
         idPool.Reset();
