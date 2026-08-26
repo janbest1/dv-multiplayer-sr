@@ -478,19 +478,31 @@ public static class NetworkedGadgets
 
     private static IEnumerator Drain()
     {
-        //A freshly built item only finishes wiring itself up on the frames after it appeared, and
-        //Place reaches straight into that wiring.
-        for (int i = 0; i < SETTLE_FRAMES; i++)
-            yield return null;
+        CommonGadgetPacket last = null;
+        int attempts = 0;
 
         while (waiting.Count > 0)
         {
+            //Every packet that has to build its own item needs this wait, not just the first of
+            //them: a freshly built item only finishes wiring itself up over the frames after it
+            //appeared, and the game's placement reaches straight into that wiring.
+            for (int i = 0; i < SETTLE_FRAMES; i++)
+                yield return null;
+
             CommonGadgetPacket packet = waiting.Peek();
 
-            //Second time round it goes through whatever the outcome, so this cannot circle forever
-            ApplyImmediate(packet, false);
+            if (!ReferenceEquals(packet, last))
+            {
+                last = packet;
+                attempts = 0;
+            }
 
-            waiting.Dequeue();
+            attempts++;
+
+            //It asks for a wait only when it has just built the item, so the second time round it
+            //finds one waiting and goes through. Refusing a third wait keeps this from circling.
+            if (ApplyImmediate(packet, attempts < 2))
+                waiting.Dequeue();
         }
 
         drain = null;
@@ -623,13 +635,6 @@ public static class NetworkedGadgets
 
             gadget.transform.localPosition = packet.LocalPosition;
             gadget.transform.localRotation = packet.LocalRotation;
-
-            //Putting the gadget on the car is the last thing that happens to the item it came from,
-            //so a placement that stopped short leaves the item lying there as a second copy of a
-            //part that is now bolted on. Taking it out of the scene is what the rest of the run
-            //would have done anyway, and dropping or picking it up switches it back on.
-            if (netItem.Item != null && !gadget.transform.IsChildOf(netItem.Item.transform))
-                netItem.Item.gameObject.SetActive(false);
 
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() picked up the pieces of a half finished placement of {packet.PrefabName} on car {packet.CarNetId}");
         }
