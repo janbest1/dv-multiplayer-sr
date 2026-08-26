@@ -1,4 +1,4 @@
-using DV.CabControls;
+﻿using DV.CabControls;
 using DV.Customization;
 using DV.Customization.Gadgets;
 using Multiplayer.Components.Networking.Player;
@@ -9,6 +9,7 @@ using Multiplayer.Utils;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -34,23 +35,42 @@ public static class NetworkedGadgets
 
     private static int localUidCounter;
 
+    //An item built this very frame is not yet whole enough to be placed, so the packet that needs
+    //it waits, and everything arriving afterwards waits behind it to keep the order intact.
+    private const int SETTLE_FRAMES = 5;
+
+    private static readonly Queue<CommonGadgetPacket> waiting = new Queue<CommonGadgetPacket>();
+    private static Coroutine drain;
+
     /// <summary>
     /// Mints a UID no other machine in this session can produce, or 0 when there is no session to
     /// collide with and the game's own numbering can stand.
     /// </summary>
-    public static int NextLocalUid()
+    public static int NextLocalUid(Customization destination)
     {
         byte playerId = NetworkLifecycle.Instance?.Client?.PlayerId ?? 0;
 
         if (playerId == 0)
             return 0;
 
-        localUidCounter = (localUidCounter + 1) & UID_COUNTER_MASK;
+        TrainCarCustomization carCustomization = destination as TrainCarCustomization;
 
-        if (localUidCounter == 0)
-            localUidCounter = 1;
+        //The counter starts over every session, but gadgets this player placed in an earlier one are
+        //still on the car under the numbers it handed out back then. Step past those.
+        for (int attempt = 0; attempt <= UID_COUNTER_MASK; attempt++)
+        {
+            localUidCounter = (localUidCounter + 1) & UID_COUNTER_MASK;
 
-        return (playerId << UID_PLAYER_SHIFT) | localUidCounter;
+            if (localUidCounter == 0)
+                localUidCounter = 1;
+
+            int uid = (playerId << UID_PLAYER_SHIFT) | localUidCounter;
+
+            if (carCustomization == null || !carCustomization.TryGetCustomizerByUID(uid, out _))
+                return uid;
+        }
+
+        return 0;
     }
 
     /// <summary>
@@ -222,6 +242,8 @@ public static class NetworkedGadgets
     /// </summary>
     public static void ClearAllFromCars()
     {
+        ClearWaiting();
+
         IsApplyingRemoteChange = true;
 
         try
@@ -359,6 +381,26 @@ public static class NetworkedGadgets
         if (packet == null)
             return;
 
+        //Anything behind a packet that is waiting on a frame has to wait with it, or a detach
+        //arrives at a car the matching attach has not reached yet and finds nothing to take down.
+        if (waiting.Count > 0)
+        {
+            waiting.Enqueue(packet);
+            EnsureDrain();
+
+            return;
+        }
+
+        if (!ApplyImmediate(packet, true))
+            Defer(packet);
+    }
+
+    /// <summary>
+    /// Runs a packet against the world. Returns false when it asked to be held over to a later
+    /// frame, which only ever happens on the first attempt.
+    /// </summary>
+    private static bool ApplyImmediate(CommonGadgetPacket packet, bool mayDefer)
+    {
         IsApplyingRemoteChange = true;
 
         try
@@ -366,8 +408,7 @@ public static class NetworkedGadgets
             switch (packet.Action)
             {
                 case GadgetAction.Attached:
-                    ApplyAttached(packet);
-                    break;
+                    return ApplyAttached(packet, mayDefer);
 
                 case GadgetAction.Detached:
                     ApplyDetached(packet);
@@ -381,10 +422,14 @@ public static class NetworkedGadgets
                     ApplyStatePacket(packet);
                     break;
             }
+
+            return true;
         }
         catch (Exception e)
         {
             Multiplayer.LogError($"NetworkedGadgets.Apply({packet.Action}) car: {packet.CarNetId}, uid: {packet.Uid}: {e.Message}\r\n{e.StackTrace}");
+
+            return true;
         }
         finally
         {
@@ -392,12 +437,84 @@ public static class NetworkedGadgets
         }
     }
 
-    private static void ApplyAttached(CommonGadgetPacket packet)
+    /// <summary>
+    /// Holds a packet over until the item it names has had a frame to finish building itself, then
+    /// replays it along with everything that queued up behind it.
+    /// </summary>
+    private static void Defer(CommonGadgetPacket packet)
+    {
+        if (NetworkedItemManager.Instance == null)
+        {
+            //Nothing here to hang a wait on, so take the chance now rather than queue for a frame
+            //that will never come round
+            ApplyImmediate(packet, false);
+
+            return;
+        }
+
+        Multiplayer.LogDebug(() => $"NetworkedGadgets.Defer() {packet.Action} car: {packet.CarNetId}, uid: {packet.Uid} is waiting for its item to finish building");
+
+        waiting.Enqueue(packet);
+        EnsureDrain();
+    }
+
+    private static void EnsureDrain()
+    {
+        if (drain != null || waiting.Count == 0)
+            return;
+
+        if (NetworkedItemManager.Instance == null)
+        {
+            //Without somewhere to run the wait, holding these back would strand every gadget packet
+            //behind them for the rest of the session
+            while (waiting.Count > 0)
+                ApplyImmediate(waiting.Dequeue(), false);
+
+            return;
+        }
+
+        drain = NetworkedItemManager.Instance.StartCoroutine(Drain());
+    }
+
+    private static IEnumerator Drain()
+    {
+        //A freshly built item only finishes wiring itself up on the frames after it appeared, and
+        //Place reaches straight into that wiring.
+        for (int i = 0; i < SETTLE_FRAMES; i++)
+            yield return null;
+
+        while (waiting.Count > 0)
+        {
+            CommonGadgetPacket packet = waiting.Peek();
+
+            //Second time round it goes through whatever the outcome, so this cannot circle forever
+            ApplyImmediate(packet, false);
+
+            waiting.Dequeue();
+        }
+
+        drain = null;
+    }
+
+    /// <summary>
+    /// Drops anything still waiting, for a session that is going away.
+    /// </summary>
+    public static void ClearWaiting()
+    {
+        waiting.Clear();
+
+        if (drain != null && NetworkedItemManager.Instance != null)
+            NetworkedItemManager.Instance.StopCoroutine(drain);
+
+        drain = null;
+    }
+
+    private static bool ApplyAttached(CommonGadgetPacket packet, bool mayDefer)
     {
         if (!TryGetCustomization(packet.CarNetId, out TrainCarCustomization customization))
         {
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() no customization for car {packet.CarNetId}");
-            return;
+            return true;
         }
 
         if (!NetworkedItem.TryGet(packet.ItemNetId, out NetworkedItem netItem) || netItem.Item == null)
@@ -409,8 +526,14 @@ public static class NetworkedGadgets
             if (netItem == null || netItem.Item == null)
             {
                 Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({packet.PrefabName}) not found for car {packet.CarNetId}");
-                return;
+                return true;
             }
+
+            //An item put together this instant is not ready to be bolted onto anything: the pieces
+            //Place goes looking for are only put in place once the item has seen a frame go by.
+            //Placing it now throws inside the game's own code and the gadget is lost.
+            if (mayDefer)
+                return false;
         }
 
         GadgetItem gadgetItem = netItem.Item.GetComponent<GadgetItem>();
@@ -418,13 +541,13 @@ public static class NetworkedGadgets
         if (gadgetItem == null)
         {
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) is not a gadget");
-            return;
+            return true;
         }
 
         if (gadgetItem.Gadget == null)
         {
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) has no gadget to place");
-            return;
+            return true;
         }
 
         //Link() throws outright on a gadget that is still attached somewhere
@@ -442,7 +565,7 @@ public static class NetworkedGadgets
 
                 Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {netItem.Item.name} was already on car {packet.CarNetId}, adopted uid {packet.Uid}");
 
-                return;
+                return true;
             }
 
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({netItem.Item.name}) is attached elsewhere, taking it down first");
@@ -454,7 +577,7 @@ public static class NetworkedGadgets
             catch (Exception e)
             {
                 Multiplayer.LogError($"NetworkedGadgets.ApplyAttached() could not take down item {packet.ItemNetId}: {e.Message}");
-                return;
+                return true;
             }
         }
 
@@ -467,12 +590,34 @@ public static class NetworkedGadgets
         //burn a number here and leave the gadget under the wrong id until the state lands
         AssignNetworkUid(gadgetItem.Gadget, packet.Uid);
 
-        GadgetBase gadget = GadgetItem.Place(customization, packet.LocalPosition, packet.LocalRotation, gadgetItem);
+        GadgetBase gadget = null;
+
+        try
+        {
+            gadget = GadgetItem.Place(customization, packet.LocalPosition, packet.LocalRotation, gadgetItem);
+        }
+        catch (Exception e)
+        {
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() the game threw while placing {packet.PrefabName} on car {packet.CarNetId}: {e.Message}");
+        }
 
         if (gadget == null)
         {
-            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() placing {netItem.Item.name} on car {packet.CarNetId} failed");
-            return;
+            //Place links the gadget onto the car before it finishes the rest of its work, so a throw
+            //part way through still leaves it hanging there. Put right what did not happen rather
+            //than walk away and leave the gadget nowhere.
+            gadget = gadgetItem.Gadget;
+
+            if (gadget == null || !gadget.IsLinked || gadget.Custom != customization)
+            {
+                Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() placing {packet.PrefabName} on car {packet.CarNetId} failed");
+                return true;
+            }
+
+            gadget.transform.localPosition = packet.LocalPosition;
+            gadget.transform.localRotation = packet.LocalRotation;
+
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() picked up the pieces of a half finished placement of {packet.PrefabName} on car {packet.CarNetId}");
         }
 
         //The state carries the placing instance's UID, which everyone has to agree on for wiring to resolve
@@ -480,7 +625,9 @@ public static class NetworkedGadgets
         Track(gadget);
         MarkAnnounced(gadget);
 
-        Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {netItem.Item.name} on car {packet.CarNetId}, uid: {gadget.UID}");
+        Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {packet.PrefabName} on car {packet.CarNetId}, uid: {gadget.UID}");
+
+        return true;
     }
 
     /// <summary>

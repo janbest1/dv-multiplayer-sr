@@ -1,4 +1,4 @@
-using DV.Customization;
+﻿using DV.Customization;
 using DV.Customization.Gadgets;
 using HarmonyLib;
 using Multiplayer.Components.Networking;
@@ -28,7 +28,7 @@ public static class GadgetItemPatch
 
         //Take the UID the game just handed out and replace it with one carrying this player's slice,
         //so the number cannot collide with one minted on another machine at the same moment
-        NetworkedGadgets.AssignNetworkUid(__result, NetworkedGadgets.NextLocalUid());
+        NetworkedGadgets.AssignNetworkUid(__result, NetworkedGadgets.NextLocalUid(destination));
 
         NetworkedGadgets.Track(__result);
 
