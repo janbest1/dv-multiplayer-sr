@@ -11,6 +11,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 
 namespace Multiplayer.Components.Networking.World;
@@ -540,12 +541,6 @@ public static class NetworkedGadgets
                 Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() item {packet.ItemNetId} ({packet.PrefabName}) not found for car {packet.CarNetId}");
                 return true;
             }
-
-            //An item put together this instant is not ready to be bolted onto anything: the pieces
-            //Place goes looking for are only put in place once the item has seen a frame go by.
-            //Placing it now throws inside the game's own code and the gadget is lost.
-            if (mayDefer)
-                return false;
         }
 
         GadgetItem gadgetItem = netItem.Item.GetComponent<GadgetItem>();
@@ -603,6 +598,20 @@ public static class NetworkedGadgets
         if (!netItem.Item.gameObject.activeSelf)
             netItem.Item.gameObject.SetActive(true);
 
+        //A GadgetItem only picks up its own ItemBase in Start, which has not run yet on an item
+        //built this same frame. Place links the gadget onto the car, switches it on and only then
+        //reaches for that item, so it throws half way through and leaves the gadget hanging.
+        if (gadgetItem.Item == null && !TryLinkItem(gadgetItem, netItem.Item))
+        {
+            //Let Unity run Start on it and come back to this a few frames from now
+            if (mayDefer)
+                return false;
+
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() {packet.PrefabName} has not finished building itself, cannot place it on car {packet.CarNetId}");
+
+            return true;
+        }
+
         //Link() mints a fresh UID from the local counter whenever it finds none, which would both
         //burn a number here and leave the gadget under the wrong id until the state lands
         AssignNetworkUid(gadgetItem.Gadget, packet.Uid);
@@ -647,6 +656,32 @@ public static class NetworkedGadgets
         Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {packet.PrefabName} on car {packet.CarNetId}, uid: {gadget.UID}");
 
         return true;
+    }
+
+    //A GadgetItem hands itself its ItemBase and lets no one else set it
+    private static readonly PropertyInfo gadgetItemItem =
+        typeof(GadgetItem).GetProperty("Item", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+    /// <summary>
+    /// Gives a gadget item the item it sits on, for the stretch before it has fetched it itself.
+    /// </summary>
+    private static bool TryLinkItem(GadgetItem gadgetItem, ItemBase item)
+    {
+        if (gadgetItem == null || item == null || gadgetItemItem == null || !gadgetItemItem.CanWrite)
+            return false;
+
+        try
+        {
+            gadgetItemItem.SetValue(gadgetItem, item);
+
+            return gadgetItem.Item != null;
+        }
+        catch (Exception e)
+        {
+            Multiplayer.LogWarning($"NetworkedGadgets.TryLinkItem() could not hand {item.name} to its gadget: {e.Message}");
+
+            return false;
+        }
     }
 
     /// <summary>
