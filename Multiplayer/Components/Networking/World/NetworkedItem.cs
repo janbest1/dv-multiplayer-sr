@@ -244,6 +244,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         throwDirection = direction;
         thrownPosition = Item.transform.position - WorldMover.currentMove;
+
+        //Both machines fold their own origin shift into every position they send. If the two have
+        //drifted apart, the same item is two places at once - and the numbers below say by how much.
+        Multiplayer.LogDebug(() => $"NetworkedItem.OnThrow() ItemNetId: {NetId}, {name}, world: {Item.transform.position}, wire: {thrownPosition}, currentMove: {WorldMover.currentMove}");
         thrownRotation = Item.transform.rotation;
 
         //Multiplayer.LogDebug(() => $"NetworkedItem.OnThrow() netId: {NetId}, Name: {name}, Raw Position: {Item.transform.position}, Position: {thrownPosition}, Rotation: {thrownRotation}, Direction: {throwDirection}");
@@ -805,14 +809,14 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //handle throwing of the item
         if (snapshot.ItemState == ItemState.Thrown)
         {
-            Multiplayer.LogDebug(() => $"NetworkedItem.HandleDroppedOrThrownState() ItemNetId: {snapshot?.ItemNetId} Thrown. Position: {transform.position}, Direction: {snapshot?.ThrowDirection}");
+            Multiplayer.LogDebug(() => $"NetworkedItem.HandleDroppedOrThrownState() ItemNetId: {snapshot?.ItemNetId} Thrown. Position: {transform.position}, Direction: {snapshot?.ThrowDirection}, wire: {snapshot?.ItemPosition}, currentMove: {WorldMover.currentMove}");
 
             wasThrown = true;
             grabHandler?.Throw(snapshot.ThrowDirection);
         }
         else
         {
-            Multiplayer.LogDebug(() => $"NetworkedItem.HandleDroppedOrThrownState() ItemNetId: {snapshot?.ItemNetId} Dropped. Position: {transform.position}");
+            Multiplayer.LogDebug(() => $"NetworkedItem.HandleDroppedOrThrownState() ItemNetId: {snapshot?.ItemNetId} Dropped. Position: {transform.position}, wire: {snapshot?.ItemPosition}, currentMove: {WorldMover.currentMove}");
         }
     }
 
