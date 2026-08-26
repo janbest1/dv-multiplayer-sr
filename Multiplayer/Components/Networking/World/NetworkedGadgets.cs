@@ -385,7 +385,7 @@ public static class NetworkedGadgets
         //arrives at a car the matching attach has not reached yet and finds nothing to take down.
         if (waiting.Count > 0)
         {
-            waiting.Enqueue(packet);
+            waiting.Enqueue(packet.Copy());
             EnsureDrain();
 
             return;
@@ -454,7 +454,7 @@ public static class NetworkedGadgets
 
         Multiplayer.LogDebug(() => $"NetworkedGadgets.Defer() {packet.Action} car: {packet.CarNetId}, uid: {packet.Uid} is waiting for its item to finish building");
 
-        waiting.Enqueue(packet);
+        waiting.Enqueue(packet.Copy());
         EnsureDrain();
     }
 
@@ -586,9 +586,16 @@ public static class NetworkedGadgets
         //keep being dragged along beside the gadget for the rest of the session.
         ReleaseFromRemoteHands(netItem.Item.gameObject);
 
+        //An item another player is carrying is switched off over here, and the game cannot place
+        //something that is not present in the scene
+        if (!netItem.Item.gameObject.activeSelf)
+            netItem.Item.gameObject.SetActive(true);
+
         //Link() mints a fresh UID from the local counter whenever it finds none, which would both
         //burn a number here and leave the gadget under the wrong id until the state lands
         AssignNetworkUid(gadgetItem.Gadget, packet.Uid);
+
+        Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() about to place {packet.PrefabName} on car {packet.CarNetId}: {Describe(customization, netItem, gadgetItem)}");
 
         GadgetBase gadget = null;
 
@@ -598,7 +605,7 @@ public static class NetworkedGadgets
         }
         catch (Exception e)
         {
-            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() the game threw while placing {packet.PrefabName} on car {packet.CarNetId}: {e.Message}");
+            Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() the game threw while placing {packet.PrefabName} on car {packet.CarNetId}: {e.Message}\r\n{Describe(customization, netItem, gadgetItem)}\r\n{e.StackTrace}");
         }
 
         if (gadget == null)
@@ -617,6 +624,13 @@ public static class NetworkedGadgets
             gadget.transform.localPosition = packet.LocalPosition;
             gadget.transform.localRotation = packet.LocalRotation;
 
+            //Putting the gadget on the car is the last thing that happens to the item it came from,
+            //so a placement that stopped short leaves the item lying there as a second copy of a
+            //part that is now bolted on. Taking it out of the scene is what the rest of the run
+            //would have done anyway, and dropping or picking it up switches it back on.
+            if (netItem.Item != null && !gadget.transform.IsChildOf(netItem.Item.transform))
+                netItem.Item.gameObject.SetActive(false);
+
             Multiplayer.LogWarning($"NetworkedGadgets.ApplyAttached() picked up the pieces of a half finished placement of {packet.PrefabName} on car {packet.CarNetId}");
         }
 
@@ -628,6 +642,28 @@ public static class NetworkedGadgets
         Multiplayer.LogDebug(() => $"NetworkedGadgets.ApplyAttached() {packet.PrefabName} on car {packet.CarNetId}, uid: {gadget.UID}");
 
         return true;
+    }
+
+    /// <summary>
+    /// What the world looks like around a placement, for working out why the game refused one.
+    /// </summary>
+    private static string Describe(TrainCarCustomization customization, NetworkedItem netItem, GadgetItem gadgetItem)
+    {
+        try
+        {
+            TrainCar car = customization != null ? customization.TrainCar : null;
+            Transform interior = car != null ? car.interior?.transform : null;
+            GameObject itemGo = netItem != null && netItem.Item != null ? netItem.Item.gameObject : null;
+            GameObject gadgetGo = gadgetItem != null && gadgetItem.Gadget != null ? gadgetItem.Gadget.gameObject : null;
+
+            return $"interior: {(interior == null ? "not loaded" : interior.name)}, " +
+                   $"item: {(itemGo == null ? "gone" : $"{itemGo.activeSelf}/{itemGo.activeInHierarchy} under {itemGo.transform.parent?.name ?? "nothing"}")}, " +
+                   $"gadget: {(gadgetGo == null ? "gone" : $"{gadgetGo.activeSelf}/{gadgetGo.activeInHierarchy} under {gadgetGo.transform.parent?.name ?? "nothing"}")}";
+        }
+        catch (Exception e)
+        {
+            return $"could not be described: {e.Message}";
+        }
     }
 
     /// <summary>

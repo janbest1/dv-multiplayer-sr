@@ -1,4 +1,4 @@
-using LiteNetLib.Utils;
+﻿using LiteNetLib.Utils;
 using Multiplayer.Networking.Data.Gadgets;
 using Multiplayer.Networking.Serialization;
 using UnityEngine;
@@ -36,6 +36,28 @@ public class CommonGadgetPacket : INetSerializable
 
     /// <summary>Whether a detached gadget should be left on the car rather than in the world.</summary>
     public bool ReparentToCar { get; set; }
+
+    /// <summary>
+    /// A copy of this packet. The reader hands the same instance back for every packet of this kind
+    /// and fills it in afresh each time, so anything that outlives the call has to keep its own.
+    /// </summary>
+    public CommonGadgetPacket Copy()
+    {
+        return new CommonGadgetPacket
+        {
+            Action = Action,
+            CarNetId = CarNetId,
+            Uid = Uid,
+            ItemNetId = ItemNetId,
+            PrefabName = PrefabName,
+            LocalPosition = LocalPosition,
+            LocalRotation = LocalRotation,
+            State = State,
+            MountPointIndex = MountPointIndex,
+            MountPointState = MountPointState,
+            ReparentToCar = ReparentToCar
+        };
+    }
 
     public void Serialize(NetDataWriter writer)
     {
