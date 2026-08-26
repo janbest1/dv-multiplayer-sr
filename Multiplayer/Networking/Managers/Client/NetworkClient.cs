@@ -376,7 +376,12 @@ public class NetworkClient : NetworkManager
          * ReadyForCustomizers
          */
 
-        //TODO: implement
+        //Our own save bolted gadgets onto these cars under UIDs nobody else knows about. Take them
+        //all off before asking for the host's, or the two sets sit on top of each other and neither
+        //side can act on the other's.
+        Log($"Clearing locally attached gadgets, the host's set follows");
+        NetworkedGadgets.ClearAllFromCars();
+
         yield return new WaitForSeconds(0.25f);
 
         /* 

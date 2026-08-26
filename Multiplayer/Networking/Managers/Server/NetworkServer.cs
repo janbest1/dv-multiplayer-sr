@@ -1329,6 +1329,11 @@ public class NetworkServer : NetworkManager
             case PlayerLoadingState.ReadyForItems:
                 // Send Inventory and world items
 
+                //Tell them what is already bolted onto the cars. Their own save put gadgets there
+                //under UIDs nobody else knows, and nothing they did to those ever reached anyone.
+                foreach (CommonGadgetPacket gadgetPacket in NetworkedGadgets.DescribeAll())
+                    SendNetSerializablePacket(player.Peer, gadgetPacket, DeliveryMethod.ReliableOrdered);
+
                 break;
 
             case PlayerLoadingState.ReadyForJobs:

@@ -168,6 +168,100 @@ public static class NetworkedGadgets
         }
     }
 
+    /// <summary>
+    /// Describes every gadget currently bolted onto the cars, so a joining player can be told what
+    /// the world already looks like. Without this both sides keep whatever their own save had, each
+    /// under its own UIDs, and nothing either of them does to a gadget reaches the other.
+    /// </summary>
+    public static List<CommonGadgetPacket> DescribeAll()
+    {
+        List<CommonGadgetPacket> described = new List<CommonGadgetPacket>();
+
+        foreach (Trainset set in Trainset.allSets)
+        {
+            foreach (TrainCar car in set.cars)
+            {
+                if (car == null || !(car.Customization is TrainCarCustomization customization))
+                    continue;
+
+                if (!TryGetCarNetId(customization, out ushort carNetId))
+                    continue;
+
+                foreach (Customization.CustomizerBase customizer in customization.Customizers)
+                {
+                    if (!(customizer is GadgetBase gadget) || gadget.GadgetItem == null)
+                        continue;
+
+                    if (!NetworkedItem.TryGetNetId(gadget.GadgetItem.Item, out ushort itemNetId) || itemNetId == 0)
+                    {
+                        Multiplayer.LogWarning($"NetworkedGadgets.DescribeAll() gadget uid {gadget.UID} on car {carNetId} has no networked item, skipping");
+                        continue;
+                    }
+
+                    described.Add(new CommonGadgetPacket
+                    {
+                        Action = GadgetAction.Attached,
+                        CarNetId = carNetId,
+                        Uid = gadget.UID,
+                        ItemNetId = itemNetId,
+                        PrefabName = gadget.GadgetItem.Item?.InventorySpecs?.ItemPrefabName,
+                        LocalPosition = gadget.transform.localPosition,
+                        LocalRotation = gadget.transform.localRotation,
+                        State = SerialiseState(gadget)
+                    });
+                }
+            }
+        }
+
+        return described;
+    }
+
+    /// <summary>
+    /// Takes every gadget off the cars. A joining client's own save put them there under UIDs nobody
+    /// else knows, so they are replaced wholesale by what the host describes.
+    /// </summary>
+    public static void ClearAllFromCars()
+    {
+        IsApplyingRemoteChange = true;
+
+        try
+        {
+            foreach (Trainset set in Trainset.allSets)
+            {
+                foreach (TrainCar car in set.cars)
+                {
+                    if (car == null || !(car.Customization is TrainCarCustomization customization))
+                        continue;
+
+                    //Link() adds to this list and Unlink() takes away, so walk it backwards
+                    for (int i = customization.Customizers.Count - 1; i >= 0; i--)
+                    {
+                        if (!(customization.Customizers[i] is GadgetBase gadget))
+                            continue;
+
+                        ClearAnnounced(gadget);
+                        trackedState.Remove(gadget);
+
+                        try
+                        {
+                            gadget.ForceRemove(false);
+                        }
+                        catch (Exception e)
+                        {
+                            Multiplayer.LogWarning($"NetworkedGadgets.ClearAllFromCars() could not take down uid {gadget.UID}: {e.Message}");
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            IsApplyingRemoteChange = false;
+        }
+
+        Multiplayer.LogDebug(() => "NetworkedGadgets.ClearAllFromCars() cleared the cars for the host's own set");
+    }
+
     public static bool TryGetCustomization(ushort carNetId, out TrainCarCustomization customization)
     {
         customization = null;
