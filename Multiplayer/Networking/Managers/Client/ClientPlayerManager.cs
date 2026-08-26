@@ -93,6 +93,10 @@ public class ClientPlayerManager : IDisposable
             return;
 
         OnPlayerDisconnected?.Invoke(networkedPlayer);
+
+        //A held item is parented to the player and would be destroyed along with them
+        networkedPlayer.DropItem();
+
         Object.Destroy(networkedPlayer.gameObject);
         playerMap.Remove(playerid);
     }

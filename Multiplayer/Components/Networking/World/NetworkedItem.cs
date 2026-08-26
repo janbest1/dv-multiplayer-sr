@@ -2,6 +2,7 @@ using DV.CabControls;
 using DV.Interaction;
 using DV.InventorySystem;
 using DV.Items;
+using Multiplayer.Components.Networking.Player;
 using Multiplayer.Components.Networking.Train;
 using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Items;
@@ -112,6 +113,15 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private bool parentLookupDone;
     private ushort lastCarNetId;
     private Coroutine deferredOnCar;
+
+    //Set while we are only mirroring this item in another player's hand
+    private NetworkedPlayer remoteHolder;
+
+    //The player we last heard is carrying this, 0 if that is us or nobody
+    private byte heldByRemote;
+
+    //What that player is doing with it, so we don't read it back off our own copy
+    private ItemState? mirroredState;
 
     //Handle ownership
     public sbyte OwnerId { get; private set; } = -1; // 0 means no owner
@@ -237,6 +247,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //An item riding on a car has its physics switched off, grabbing it puts them back
         SetRidingPhysics(false);
 
+        //It is in our hands now, whoever we thought was carrying it no longer is
+        heldByRemote = 0;
+        mirroredState = null;
+
         stateDirty = true;
     }
 
@@ -336,6 +350,27 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (Item == null && Register() == false)
             return null;
 
+        //The player carrying it may have left. Their model is gone, and with it any chance of
+        //hearing where the item went, so it falls back to us to speak for it.
+        if (heldByRemote != 0 && (!NetworkLifecycle.Instance.IsClientRunning ||
+            !NetworkLifecycle.Instance.Client.ClientPlayerManager.TryGetPlayer(heldByRemote, out _)))
+        {
+            byte gone = heldByRemote;
+            Multiplayer.LogDebug(() => $"NetworkedItem.GetSnapshot() NetId: {NetId}, name: {name}. Player {gone} carrying it is gone");
+            heldByRemote = 0;
+            mirroredState = null;
+            ReleaseFromRemoteHand();
+        }
+
+        //An item we only show in another player's hand is theirs to report on, not ours. It lives
+        //under their player object, so everything we could measure about it here would contradict
+        //what they are telling us.
+        if (remoteHolder != null)
+        {
+            MarkValuesClean();
+            return null;
+        }
+
         //The game re-parents items without raising an event (e.g. an item put down in a loco cab),
         //so a change of parent is treated as a possible state change.
         bool parentChanged = RefreshParentCar();
@@ -353,7 +388,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         ItemState currentState = GetItemState();
 
-        //Items held by another player are deactivated for us, we must not report state for those
+        //Items stowed in another player's inventory are deactivated for us, we must not report
+        //state for those. Items in another player's hand are caught by the remoteHolder check above.
         if (gameObject.activeInHierarchy &&
             (currentState != lastState || (currentState == ItemState.OnCar && parentCar.GetNetId() != lastCarNetId)))
         {
@@ -582,12 +618,20 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             }
         }
 
+        //An item in a hand or a bag has no position of its own to send, the player carrying it is
+        //what the other side needs in order to place it. Usually that is us; when we are only
+        //passing on what someone else told us, it is still them.
+        byte holder = 0;
+        if (itemState == ItemState.InHand || itemState == ItemState.InInventory)
+            holder = heldByRemote != 0 ? heldByRemote : (NetworkLifecycle.Instance.Client?.PlayerId ?? 0);
+
         var updateData = new ItemUpdateData
         {
             UpdateType = updateType,
             ItemNetId = NetId,
             PrefabName = Item.InventorySpecs.ItemPrefabName,
             ItemState = itemState,
+            Player = holder,
             ItemPosition = position,
             ItemRotation = rotation,
             ThrowDirection = throwDirection,
@@ -602,6 +646,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private ItemState GetItemState()
     {
+        //An item another player is carrying is in their hand or their bag, whatever our own copy of
+        //it is parented to. Reading it off the transform would call it dropped on the spot.
+        if (mirroredState.HasValue)
+            return mirroredState.Value;
+
         RefreshParentCar();
 
         //Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, Parent: {Item.transform.parent} WorldMover: {WorldMover.OriginShiftParent}, wasThrown: {wasThrown}, isGrabbed: {Item.IsGrabbed()} Inventory.Contains(): {Inventory.Instance.Contains(this.gameObject, false)} Storage.Contains: {StorageController.Instance.StorageInventory.ContainsItem(Item)}");
@@ -803,6 +852,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void HandleDroppedOrThrownState(ItemUpdateData snapshot)
     {
+        //it may have been in another player's hand
+        heldByRemote = 0;
+        mirroredState = null;
+        ReleaseFromRemoteHand();
+
         //resolve attachment
         if (Item.IsSnapped)
         {
@@ -843,6 +897,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void HandleAttachedState(ItemUpdateData snapshot)
     {
+        //it may have been in another player's hand
+        heldByRemote = 0;
+        mirroredState = null;
+        ReleaseFromRemoteHand();
+
         //resovle ownership
         if (NetworkLifecycle.Instance.IsHost())
             if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(snapshot.Player, out ServerPlayer player) && player.OwnsItem(NetId))
@@ -878,6 +937,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void HandleOnCarState(ItemUpdateData snapshot)
     {
+        //it may have been in another player's hand
+        heldByRemote = 0;
+        mirroredState = null;
+        ReleaseFromRemoteHand();
+
         //resolve attachment
         if (Item.IsSnapped)
         {
@@ -976,6 +1040,18 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void HandleInventoryOrHandState(ItemUpdateData snapshot)
     {
+        //Remember who has it, unless the snapshot is talking about us
+        if (snapshot.Player != 0 && snapshot.Player != (NetworkLifecycle.Instance.Client?.PlayerId ?? 0))
+        {
+            heldByRemote = snapshot.Player;
+            mirroredState = snapshot.ItemState;
+        }
+        else
+        {
+            heldByRemote = 0;
+            mirroredState = null;
+        }
+
         if (Item.IsSnapped)
         {
             Item.SnappableItem.SnappedTo.UnsnapItem(false);
@@ -988,8 +1064,109 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(snapshot.Player, out ServerPlayer player) && !player.OwnsItem(NetId))
                 player.AddOwnedItem(NetId);
 
-        //todo add to player model's hand
+        //Show it in the other player's hand if we have a model to hang it off
+        if (snapshot.ItemState == ItemState.InHand && TryShowInRemoteHand(snapshot.Player))
+            return;
+
+        //Stowed, or held by someone we can't see - out of sight either way
+        ReleaseFromRemoteHand();
         this.gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Hangs the item off another player's model so we can see what they are carrying.
+    /// </summary>
+    /// <returns>True if the item is now in that player's hand.</returns>
+    private bool TryShowInRemoteHand(byte playerId)
+    {
+        if (playerId == 0 || !NetworkLifecycle.Instance.IsClientRunning)
+            return false;
+
+        //Our own hands are the real thing, we never mirror those. The player map only holds
+        //other players, so this fails for us by itself.
+        if (!NetworkLifecycle.Instance.Client.ClientPlayerManager.TryGetPlayer(playerId, out NetworkedPlayer holder) || holder == null)
+        {
+            Multiplayer.LogDebug(() => $"NetworkedItem.TryShowInRemoteHand() NetId: {NetId}, name: {name}. No player model for {playerId}");
+            return false;
+        }
+
+        //Already in that player's hand, nothing to do but make sure it can be seen
+        if (remoteHolder == holder && holder.RightHandItemGO == gameObject)
+        {
+            gameObject.SetActive(true);
+            return true;
+        }
+
+        ReleaseFromRemoteHand();
+
+        //Only one item fits in the hand we model, whatever was there goes out of sight
+        if (holder.RightHandItemGO != null && holder.RightHandItemGO != gameObject)
+        {
+            NetworkedItem previous = holder.RightHandItemGO.GetComponent<NetworkedItem>();
+            holder.DropItem();
+
+            if (previous != null)
+            {
+                previous.remoteHolder = null;
+                previous.gameObject.SetActive(false);
+            }
+        }
+
+        if (transform.parent != WorldMover.OriginShiftParent)
+            transform.SetParent(WorldMover.OriginShiftParent, true);
+
+        gameObject.SetActive(true);
+
+        GetHoldAnchor(out Vector3? localPos, out Quaternion? localRot);
+        holder.HoldItem(gameObject, localPos, localRot);
+        remoteHolder = holder;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.TryShowInRemoteHand() NetId: {NetId}, name: {name}, player: {holder.Username}, localPos: {localPos}, localRot: {localRot}");
+        return true;
+    }
+
+    /// <summary>
+    /// Takes the item back out of another player's hand. Safe to call when it isn't in one.
+    /// </summary>
+    private void ReleaseFromRemoteHand()
+    {
+        NetworkedPlayer holder = remoteHolder;
+        remoteHolder = null;
+
+        if (holder == null)
+            return;
+
+        if (holder.RightHandItemGO == gameObject)
+            holder.DropItem();
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.ReleaseFromRemoteHand() NetId: {NetId}, name: {name}");
+    }
+
+    /// <summary>
+    /// Reads the item's own idea of where it sits in a non-VR hand, so a mirrored item is held the
+    /// same way the owner sees it.
+    /// </summary>
+    private void GetHoldAnchor(out Vector3? localPos, out Quaternion? localRot)
+    {
+        localPos = null;
+        localRot = null;
+
+        FovBasedNonVRGrabAnchor fovAnchor = GetComponentInChildren<FovBasedNonVRGrabAnchor>(true);
+        if (fovAnchor != null)
+        {
+            var anchor = fovAnchor.GetGrabAnchor();
+            localPos = anchor.localPos;
+            localRot = anchor.localRot;
+            return;
+        }
+
+        CustomNonVrGrabAnchor customAnchor = GetComponentInChildren<CustomNonVrGrabAnchor>(true);
+        if (customAnchor != null)
+        {
+            var anchor = customAnchor.GetGrabAnchor();
+            localPos = anchor.localPos;
+            localRot = anchor.localRot;
+        }
     }
     #endregion
 
@@ -999,6 +1176,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return;
 
         CancelDeferredOnCar();
+        ReleaseFromRemoteHand();
 
         if (UnloadWatcher.isUnloading)
         {

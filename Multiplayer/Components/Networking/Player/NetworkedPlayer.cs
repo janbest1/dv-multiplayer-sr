@@ -138,6 +138,10 @@ public class NetworkedPlayer : MonoBehaviour
 
             playerModel?.SetActive(!value);
             nameTag?.gameObject.SetActive(!value);
+
+            //A held item is not part of the model, it would be left hanging in mid-air
+            if (RightHandItemGO != null)
+                RightHandItemGO.SetActive(!value);
         }
     }
 
@@ -182,6 +186,10 @@ public class NetworkedPlayer : MonoBehaviour
     protected void OnDestroy()
     {
         Settings.OnSettingsUpdated -= OnSettingsUpdated;
+
+        //A held item is parented to us and would be destroyed along with us
+        if (!UnloadWatcher.isQuitting && !UnloadWatcher.isUnloading && RightHandItemGO != null)
+            DropItem();
     }
 
     private void OnSettingsUpdated(Settings settings)
@@ -278,6 +286,7 @@ public class NetworkedPlayer : MonoBehaviour
                 selfTransform.position = targetPos + WorldMover.currentMove;
 
             selfTransform.rotation = targetRotation;
+            RefreshHeldItemPose();
             return;
         }
 
@@ -332,11 +341,21 @@ public class NetworkedPlayer : MonoBehaviour
             selfTransform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, t);
         }
 
-        if (RightHandItemGO != null)
-        {
-            RightHandItemGO.transform.position = selfTransform.position + GetItemOffsetFromPlayer();
-            RightHandItemGO.transform.rotation = selfTransform.rotation * (itemHoldRot ?? Quaternion.identity);//ItemPositionController.Instance.itemAnchor.localRotation);
-        }
+        RefreshHeldItemPose();
+    }
+
+    /// <summary>
+    /// Places the held item in front of the player. The item is parented to the player, but its
+    /// pose is driven from here rather than from the parent so it can be offset by the item's own
+    /// grab anchor.
+    /// </summary>
+    private void RefreshHeldItemPose()
+    {
+        if (RightHandItemGO == null)
+            return;
+
+        RightHandItemGO.transform.position = selfTransform.position + GetItemOffsetFromPlayer();
+        RightHandItemGO.transform.rotation = selfTransform.rotation * (itemHoldRot ?? Quaternion.identity);//ItemPositionController.Instance.itemAnchor.localRotation);
     }
 
     /// <summary>
@@ -569,6 +588,12 @@ public class NetworkedPlayer : MonoBehaviour
         RightHandItemGO = itemGo;
         itemHoldPos = targetPos;
         itemHoldRot = targetRot;
+
+        //A culled player shows no model, so their item must not hang there on its own
+        if (isCulled)
+            itemGo.SetActive(false);
+
+        RefreshHeldItemPose();
     }
 
     /// <summary>
@@ -578,6 +603,17 @@ public class NetworkedPlayer : MonoBehaviour
     // TODO: This currently only supports right hand holding and will need to be expanded to support left hand items and dual hand items
     public void DropItem()
     {
+        //Unity keeps a destroyed object's reference alive but hollow, and C#'s ?. does not consult
+        //Unity's own idea of null, so the reads below would throw from native code
+        if (RightHandItemGO == null)
+        {
+            disabledRHItemColliders.Clear();
+            RightHandItemGO = null;
+            itemHoldPos = null;
+            itemHoldRot = null;
+            return;
+        }
+
         // Re-enable previously disabled colliders
         foreach (Collider col in disabledRHItemColliders)
         {
@@ -594,7 +630,7 @@ public class NetworkedPlayer : MonoBehaviour
             itemGrabHandler.interactionAllowed = true;
         }
 
-        RightHandItemGO?.transform.SetParent(WorldMover.OriginShiftParent, true);
+        RightHandItemGO.transform.SetParent(WorldMover.OriginShiftParent, true);
 
         RightHandItemGO = null;
         itemHoldPos = null;
