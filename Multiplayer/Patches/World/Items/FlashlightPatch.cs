@@ -1,7 +1,6 @@
 using HarmonyLib;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Utils;
-using System;
 using UnityEngine;
 
 namespace Multiplayer.Patches.World.Items;
@@ -15,64 +14,35 @@ public static class FlashlightItemPatch
         var networkedItem = __instance.gameObject.GetOrAddComponent<NetworkedItem>();
         networkedItem.Initialize(__instance);
 
-        // Register the values you want to track with both getters and setters
-        networkedItem.RegisterTrackedValue(
-            "originalLightIntensity",
-            () => __instance.originalLightIntensity,
-            value => __instance.originalLightIntensity = value,
-            serverAuthoritative: true                           //This parameter is driven by the server: true
-            );
-
-        //probably not needed as flicker can be handled locally
-        //networkedItem.RegisterTrackedValue(
-        //    "intensity",
-        //    () => __instance.spotlight.intensity,
-        //    value =>  __instance.spotlight.intensity = value,
-        //    serverAuthoritative: true                           //This parameter is driven by the server: true
-        //    );
-
-        networkedItem.RegisterTrackedValue(
-            "originalBeamColour",
-            () => __instance.originalBeamColor.ColorToUInt32(),
-            value =>__instance.originalBeamColor = value.UInt32ToColor(),
-            serverAuthoritative: true                           //This parameter is driven by the server: true
-            );
-
-        networkedItem.RegisterTrackedValue(
-            "beamColour",
-            () => __instance.beamController.GetBeamColor().ColorToUInt32(),
-            value =>
-            {
-                Color colour = value.UInt32ToColor();
-                __instance.beamController.SetBeamColor(colour);
-                __instance.spotlight.color = colour;
-            },
-            serverAuthoritative: true                            //This parameter is driven by the server: true
-            );
-
-        networkedItem.RegisterTrackedValue(
-            "batteryPower",
-            () => __instance.battery.currentPower,
-            value =>
-                {
-                    __instance.battery.currentPower = value;     //set the value
-                    __instance.battery.UpdatePower(0f);          //process a delta of 0 to force an update
-                },
-            (current, last) => Math.Abs(current - last) >= 1.0f, //Don't communicate updates for changes less than 1f
-            true                                                 //This parameter is driven by the server: true
-            );
-
+        //Only whether the lamp is on is followed. The beam colour and intensity are read off the
+        //prefab in Start(), so they are the same everywhere without being sent, and the battery is
+        //deliberately left alone: it is server authoritative, so a client's charge never reaches
+        //anyone, and both machines run their own copy down. One player's lamp went flat in the
+        //other player's hands while their own still had charge.
         networkedItem.RegisterTrackedValue(
             "buttonState",
             () => (__instance.button.Value > 0f),
             value =>
                 {
+                    //Our copy of the battery is not kept in step, so it may read flat while the
+                    //player carrying the lamp still has charge. Theirs burns, ours would not.
+                    if (value && __instance.battery != null && __instance.battery.Depleted)
+                    {
+                        __instance.battery.currentPower = 100f;
+                        __instance.battery.UpdatePower(0f);
+                    }
+
                     if (value)
                         __instance.button.SetValue(1f);
                     else
                         __instance.button.SetValue(0f);
 
                     __instance.ToggleFlashlight(value);
+
+                    //Switching it on starts the drain. On somebody else's lamp that would run our
+                    //own copy down until it went dark in their hands.
+                    if (__instance.batteryConsumer != null)
+                        __instance.batteryConsumer.TogglePowerConsumption(false);
                 }
             );
 

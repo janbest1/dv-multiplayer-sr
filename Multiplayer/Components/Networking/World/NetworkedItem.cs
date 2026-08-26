@@ -350,17 +350,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (Item == null && Register() == false)
             return null;
 
-        //The player carrying it may have left. Their model is gone, and with it any chance of
-        //hearing where the item went, so it falls back to us to speak for it.
-        if (heldByRemote != 0 && (!NetworkLifecycle.Instance.IsClientRunning ||
-            !NetworkLifecycle.Instance.Client.ClientPlayerManager.TryGetPlayer(heldByRemote, out _)))
-        {
-            byte gone = heldByRemote;
-            Multiplayer.LogDebug(() => $"NetworkedItem.GetSnapshot() NetId: {NetId}, name: {name}. Player {gone} carrying it is gone");
-            heldByRemote = 0;
-            mirroredState = null;
-            ReleaseFromRemoteHand();
-        }
+        if (heldByRemote != 0)
+            ReviewRemoteHolder();
 
         //An item we only show in another player's hand is theirs to report on, not ours. It lives
         //under their player object, so everything we could measure about it here would contradict
@@ -1071,6 +1062,51 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //Stowed, or held by someone we can't see - out of sight either way
         ReleaseFromRemoteHand();
         this.gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Puts the item into its carrier's hand once we know who that is. Their model can arrive after
+    /// the item does: on joining, the host introduces everything standing nearby, and an item can
+    /// land before the player whose hand it is in - leaving it switched off for good, because
+    /// nothing about it changes again for the host to tell us about.
+    /// </summary>
+    private void ReviewRemoteHolder()
+    {
+        if (mirroredState != ItemState.InHand || remoteHolder != null)
+            return;
+
+        if (!NetworkLifecycle.Instance.IsClientRunning)
+            return;
+
+        if (!NetworkLifecycle.Instance.Client.ClientPlayerManager.TryGetPlayer(heldByRemote, out NetworkedPlayer holder) || holder == null)
+            return;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.ReviewRemoteHolder() NetId: {NetId}, name: {name}. Player {holder.Username} is here now");
+        TryShowInRemoteHand(heldByRemote);
+    }
+
+    /// <summary>
+    /// Hands the item back to the world when the player carrying it has left. Nobody is going to
+    /// say where it went otherwise, so whatever they had in hand is left where they stood.
+    /// </summary>
+    public void ReleaseHeldBy(byte playerId)
+    {
+        if (heldByRemote != playerId)
+            return;
+
+        bool wasInHand = mirroredState == ItemState.InHand;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.ReleaseHeldBy({playerId}) NetId: {NetId}, name: {name}, was in hand: {wasInHand}");
+
+        heldByRemote = 0;
+        mirroredState = null;
+        ReleaseFromRemoteHand();
+
+        if (!wasInHand)
+            return;
+
+        gameObject.SetActive(true);
+        stateDirty = true;
     }
 
     /// <summary>

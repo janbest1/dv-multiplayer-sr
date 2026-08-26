@@ -357,8 +357,9 @@ public class NetworkServer : NetworkManager
 
         PlayerDisconnected?.Invoke(player);
 
-        //Ids set aside for items this player never got round to introducing
-        NetworkedItemManager.Instance?.ForgetPromisesTo(player.PlayerId);
+        //Ids set aside for items this player never got round to introducing, and anything still
+        //carrying their name
+        NetworkedItemManager.Instance?.ForgetPlayer(player.PlayerId);
 
         player?.Dispose();
     }

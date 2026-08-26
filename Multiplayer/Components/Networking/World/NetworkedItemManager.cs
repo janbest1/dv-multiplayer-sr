@@ -366,16 +366,32 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     }
 
     /// <summary>
-    /// Forgets what a departing player never got round to introducing.
+    /// Lets go of everything that still points at a player who has left.
     /// </summary>
-    public void ForgetPromisesTo(byte playerId)
+    public void ForgetPlayer(byte playerId)
     {
+        //Ids set aside for items this player never got round to introducing
         List<ushort> stale = promisedToPlayer.Where(pair => pair.Value == playerId).Select(pair => pair.Key).ToList();
 
         foreach (ushort netId in stale)
         {
             promisedToPlayer.Remove(netId);
             promisedGuid.Remove(netId);
+        }
+
+        //Player ids are handed out again, so a rejoining player usually gets their old one back. An
+        //item still named after them is then taken for one they just reported and never introduced
+        //to them - which is why the lantern they walked out with was missing when they came back.
+        foreach (var item in NetworkedItem.GetAll())
+        {
+            if (item == null)
+                continue;
+
+            if (item.LastReportedBy == playerId)
+                item.LastReportedBy = 0;
+
+            //Whatever they were carrying is nobody's now
+            item.ReleaseHeldBy(playerId);
         }
     }
 
