@@ -344,7 +344,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //evaluating it until it comes to rest, otherwise it never leaves the Thrown state.
         bool settling = !wasThrown && lastState == ItemState.Thrown;
 
-        if (!stateDirty && !hasDirtyVals && !parentChanged && !settling)
+        //An item nobody has been told about yet has something to say even when nothing about it has
+        //changed. A client buys a beacon, puts it down and leaves it alone: it holds still, so
+        //nothing is dirty, and the introduction that would make it real for everyone else never
+        //goes out. It only appeared once the player happened to pick it up again.
+        if (!createdDirty && !stateDirty && !hasDirtyVals && !parentChanged && !settling)
             return null;
 
         ItemState currentState = GetItemState();
@@ -358,7 +362,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
                 stateDirty = true;
         }
 
-        if (!stateDirty && !hasDirtyVals)
+        if (!createdDirty && !stateDirty && !hasDirtyVals)
             return null;
 
         if (!createdDirty)
