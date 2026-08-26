@@ -192,6 +192,7 @@ public class NetworkServer : NetworkManager
         netPacketProcessor.SubscribeReusable<CommonCashRegisterWithModulesActionPacket, ITransportPeer>(OnCommonCashRegisterWithModulesActionPacket);
 
         netPacketProcessor.SubscribeReusable<CommonGenericSwitchStatePacket, ITransportPeer>(OnCommonGenericSwitchStatePacket);
+        netPacketProcessor.SubscribeReusable<ServerboundItemRegisterPacket, ITransportPeer>(OnServerboundItemRegisterPacket);
 
 
         // Player
@@ -355,6 +356,9 @@ public class NetworkServer : NetworkManager
         );
 
         PlayerDisconnected?.Invoke(player);
+
+        //Ids set aside for items this player never got round to introducing
+        NetworkedItemManager.Instance?.ForgetPromisesTo(player.PlayerId);
 
         player?.Dispose();
     }
@@ -2094,6 +2098,28 @@ public class NetworkServer : NetworkManager
         {
             LogError($"OnCommonPitStopInteractionPacket() Failed to find PitStopStation with netId: {packet.NetId}");
         }
+    }
+
+    /// <summary>
+    /// Names something a client built itself. The id is taken straight out of the pool and the
+    /// object that answers to it is made wherever it is first needed - building a spare copy here
+    /// just to read its number once left the host with real items nobody had asked for.
+    /// </summary>
+    private void OnServerboundItemRegisterPacket(ServerboundItemRegisterPacket packet, ITransportPeer peer)
+    {
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+            return;
+
+        ushort netId = NetworkedItemManager.Instance.PromiseItemToPlayer(player.PlayerId, out Guid guid);
+
+        LogDebug(() => $"OnServerboundItemRegisterPacket() {packet.PrefabName} is item {netId} ({guid}) for {player.Username}");
+
+        SendPacket(player.Peer, new ClientboundItemRegisteredPacket
+        {
+            RequestId = packet.RequestId,
+            ItemNetId = netId,
+            Guid = guid.ToByteArray()
+        }, DeliveryMethod.ReliableOrdered);
     }
 
     private void OnCommonItemChangePacket(CommonItemChangePacket packet, ITransportPeer peer)

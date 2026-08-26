@@ -91,6 +91,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             return;
 
         NetworkLifecycle.Instance.OnTick -= Common_OnTick;
+
+        awaitingRegistration.Clear();
+        requested.Clear();
     }
 
     public void AddDirtyItemSnapshot(NetworkedItem netItem, ItemUpdateData snapshot)
@@ -292,11 +295,87 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         DestroyedItems.Clear();
     }
 
+    #region Naming Items For A Client
+
+    //What the host has promised a client but not yet seen. An id on its own is no use: the item it
+    //stands for lives on the client, and until the client introduces it the host has nothing to
+    //apply updates to.
+    private readonly Dictionary<ushort, byte> promisedToPlayer = new Dictionary<ushort, byte>();
+    private readonly Dictionary<ushort, Guid> promisedGuid = new Dictionary<ushort, Guid>();
+
+    /// <summary>
+    /// Sets an id and a lasting name aside for something a client built itself. Nothing is created
+    /// here - building a copy just to read its number leaves the host with a real item nobody asked
+    /// for. The item arrives with the client's own introduction.
+    /// </summary>
+    public ushort PromiseItemToPlayer(byte playerId, out Guid guid)
+    {
+        ushort netId = NetworkedItem.ReserveId();
+
+        guid = Guid.NewGuid();
+
+        promisedToPlayer[netId] = playerId;
+        promisedGuid[netId] = guid;
+
+        return netId;
+    }
+
+    /// <summary>
+    /// Whether this player may introduce this item, and if so builds the host's copy of it.
+    /// </summary>
+    private bool AcceptPromisedItem(ItemUpdateData snapshot, ServerPlayer player)
+    {
+        if (!promisedToPlayer.TryGetValue(snapshot.ItemNetId, out byte promisedTo) || promisedTo != player.PlayerId)
+            return false;
+
+        if (NetworkedItem.TryGet(snapshot.ItemNetId, out NetworkedItem existing) && existing != null)
+        {
+            //Already introduced once; a second introduction would replace an item that is in use
+            NetworkLifecycle.Instance.Server.LogWarning($"NetworkedItemManager.AcceptPromisedItem() {player.Username} introduced item {snapshot.ItemNetId} twice");
+            return false;
+        }
+
+        promisedGuid.TryGetValue(snapshot.ItemNetId, out Guid guid);
+
+        promisedToPlayer.Remove(snapshot.ItemNetId);
+        promisedGuid.Remove(snapshot.ItemNetId);
+
+        CreateItem(snapshot);
+
+        //The host's own record, not the client's word for it
+        if (NetworkedItem.TryGet(snapshot.ItemNetId, out NetworkedItem netItem) && netItem != null)
+            netItem.AssignGuid(guid);
+
+        NetworkLifecycle.Instance.Server.LogDebug(() => $"NetworkedItemManager.AcceptPromisedItem() {player.Username} introduced {snapshot.PrefabName} as item {snapshot.ItemNetId} ({guid})");
+
+        return true;
+    }
+
+    /// <summary>
+    /// Forgets what a departing player never got round to introducing.
+    /// </summary>
+    public void ForgetPromisesTo(byte playerId)
+    {
+        List<ushort> stale = promisedToPlayer.Where(pair => pair.Value == playerId).Select(pair => pair.Key).ToList();
+
+        foreach (ushort netId in stale)
+        {
+            promisedToPlayer.Remove(netId);
+            promisedGuid.Remove(netId);
+        }
+    }
+
+    #endregion
+
     private void ProcessReceivedAsHost(ItemUpdateData snapshot, ServerPlayer player)
     {
         if (snapshot.UpdateType == ItemUpdateData.ItemUpdateType.Create)
         {
-            NetworkLifecycle.Instance.Server.LogError($"NetworkedItemManager.ProcessReceivedAsHost() Host received Create snapshot! ItemNetId: {snapshot.ItemNetId}, prefabName: {snapshot.PrefabName}");
+            //A client introducing something the host set an id aside for is the one Create the host
+            //accepts. Anything else is a client trying to invent an item.
+            if (!AcceptPromisedItem(snapshot, player))
+                NetworkLifecycle.Instance.Server.LogError($"NetworkedItemManager.ProcessReceivedAsHost() Host received Create snapshot! ItemNetId: {snapshot.ItemNetId}, prefabName: {snapshot.PrefabName}");
+
             return;
         }
 
@@ -368,6 +447,66 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     #region Client
 
+    #region Naming Items A Client Built Itself
+
+    private uint nextRequestId = 1;
+    private readonly Dictionary<uint, NetworkedItem> awaitingRegistration = new Dictionary<uint, NetworkedItem>();
+    private readonly HashSet<NetworkedItem> requested = new HashSet<NetworkedItem>();
+
+    /// <summary>
+    /// Asks the host to name an item, once. Repeating the question every tick would hand out a
+    /// fresh id per tick for the same item.
+    /// </summary>
+    private void RequestRegistration(NetworkedItem netItem)
+    {
+        if (netItem == null || netItem.Item == null || requested.Contains(netItem))
+            return;
+
+        string prefabName = netItem.Item.InventorySpecs?.ItemPrefabName;
+
+        if (string.IsNullOrEmpty(prefabName))
+            return;
+
+        uint requestId = nextRequestId++;
+
+        requested.Add(netItem);
+        awaitingRegistration[requestId] = netItem;
+
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.RequestRegistration() asking for {prefabName}, request {requestId}");
+
+        NetworkLifecycle.Instance.Client?.SendItemRegisterRequest(requestId, prefabName);
+    }
+
+    /// <summary>
+    /// The host's answer: from here on this item has an address and a lasting name.
+    /// </summary>
+    public void ItemRegistered(uint requestId, ushort netId, Guid guid)
+    {
+        if (!awaitingRegistration.TryGetValue(requestId, out NetworkedItem netItem))
+        {
+            Multiplayer.LogWarning($"NetworkedItemManager.ItemRegistered() no request {requestId} outstanding for item {netId}");
+            return;
+        }
+
+        awaitingRegistration.Remove(requestId);
+
+        if (netItem == null)
+        {
+            //The item went away while the question was in flight; the id simply goes unused
+            Multiplayer.LogDebug(() => $"NetworkedItemManager.ItemRegistered() item {netId} is already gone");
+            return;
+        }
+
+        requested.Remove(netItem);
+
+        netItem.NetId = netId;
+        netItem.AssignGuid(guid);
+
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.ItemRegistered() {netItem.name} is now item {netId} ({guid})");
+    }
+
+    #endregion
+
     private void ProcessClientChanges(uint tick)
     {
         List<ItemUpdateData> changedItems = new List<ItemUpdateData>();
@@ -377,6 +516,19 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
         foreach (var item in NetworkedItem.GetAll())
         {
+            if (item == null)
+                continue;
+
+            //Ids belong to the host. Anything this client brought into the world itself - bought,
+            //loaded from its own save, taken back out of the cache - starts at zero, and the host
+            //throws away every word said about item zero. Ask for a name, and stay quiet until
+            //it arrives rather than filling the wire with updates nobody can act on.
+            if (item.NetId == 0)
+            {
+                RequestRegistration(item);
+                continue;
+            }
+
             ItemUpdateData snapshot = item.GetSnapshot();
             if (snapshot != null)
             {

@@ -251,6 +251,7 @@ public class NetworkClient : NetworkManager
         netPacketProcessor.SubscribeReusable<ClientboundPitStopBulkUpdatePacket>(OnClientboundPitStopBulkUpdatePacket);
         netPacketProcessor.SubscribeReusable<CommonCashRegisterWithModulesActionPacket>(OnCommonCashRegisterWithModulesActionPacket);
         netPacketProcessor.SubscribeReusable<CommonGenericSwitchStatePacket>(OnCommonGenericSwitchStatePacket);
+        netPacketProcessor.SubscribeReusable<ClientboundItemRegisteredPacket>(OnClientboundItemRegisteredPacket);
 
         netPacketProcessor.SubscribeReusable<CommonChatPacket>(OnCommonChatPacket);
     }
@@ -1301,6 +1302,15 @@ public class NetworkClient : NetworkManager
     }
 
 
+    private void OnClientboundItemRegisteredPacket(ClientboundItemRegisteredPacket packet)
+    {
+        LogDebug(() => $"OnClientboundItemRegisteredPacket() request: {packet?.RequestId}, item: {packet?.ItemNetId}");
+
+        Guid guid = packet.Guid != null && packet.Guid.Length == 16 ? new Guid(packet.Guid) : Guid.Empty;
+
+        NetworkedItemManager.Instance.ItemRegistered(packet.RequestId, packet.ItemNetId, guid);
+    }
+
     private void OnCommonItemChangePacket(CommonItemChangePacket packet)
     {
         //LogDebug(() => $"OnCommonItemChangePacket({packet?.Items?.Count})");
@@ -1886,6 +1896,21 @@ public class NetworkClient : NetworkManager
             Position = position,
             Rotation = rotation,
 
+        }, DeliveryMethod.ReliableOrdered);
+    }
+
+    /// <summary>
+    /// Asks the host to name an item this client brought into the world itself. Until the answer
+    /// comes back the item has no id and nothing said about it can be acted on anywhere else.
+    /// </summary>
+    public void SendItemRegisterRequest(uint requestId, string prefabName)
+    {
+        LogDebug(() => $"SendItemRegisterRequest({requestId}, {prefabName})");
+
+        SendPacketToServer(new ServerboundItemRegisterPacket
+        {
+            RequestId = requestId,
+            PrefabName = prefabName
         }, DeliveryMethod.ReliableOrdered);
     }
 

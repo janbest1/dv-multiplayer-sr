@@ -53,6 +53,16 @@ public abstract class IdMonoBehaviour<T, I> : MonoBehaviour where T : struct whe
         Register(idPool.NextId);
     }
 
+    /// <summary>
+    /// Takes the next id out of the pool without anything to hang it on. The host hands these to
+    /// clients for things they built themselves, and the object that answers to the id is made
+    /// wherever it is actually needed.
+    /// </summary>
+    public static T ReserveId()
+    {
+        return idPool.NextId;
+    }
+
     public void Register(T id)
     {
         _netId = id;

@@ -33,6 +33,12 @@ public class ItemUpdateData
     public bool AttachedFront  { get; set; }
     public Dictionary<string, object> States { get; set; }
 
+    /// <summary>
+    /// The item's lasting name, handed out by the host. Only travels when the item is introduced -
+    /// it never changes afterwards, and sixteen bytes on every tick of every item would not be free.
+    /// </summary>
+    public Guid Guid { get; set; }
+
     public void Serialize(NetDataWriter writer)
     {
         writer.Put((byte)UpdateType);
@@ -44,7 +50,10 @@ public class ItemUpdateData
         writer.Put((byte)ItemState);
 
         if (UpdateType.HasFlag(ItemUpdateType.Create))
+        {
             writer.Put(PrefabName);
+            writer.PutBytesWithLength(Guid.ToByteArray());
+        }
 
         if (UpdateType.HasFlag(ItemUpdateType.Create) || UpdateType.HasFlag(ItemUpdateType.ItemState))
         {
@@ -101,7 +110,12 @@ public class ItemUpdateData
         ItemState = (ItemState)reader.GetByte();
 
         if (UpdateType.HasFlag(ItemUpdateType.Create))
+        {
             PrefabName = reader.GetString();
+
+            byte[] guidBytes = reader.GetBytesWithLength();
+            Guid = guidBytes != null && guidBytes.Length == 16 ? new Guid(guidBytes) : Guid.Empty;
+        }
 
         if (UpdateType.HasFlag(ItemUpdateType.Create) || UpdateType.HasFlag(ItemUpdateType.ItemState))
         {

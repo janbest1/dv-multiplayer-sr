@@ -75,6 +75,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private const float RotationThreshold = 0.1f;
 
     public ItemBase Item { get; private set; }
+
+    /// <summary>
+    /// The item's lasting name. NetId is an address on the wire and starts over with every server,
+    /// so anything that has to still mean the same item after a restart - a player's inventory, a
+    /// lost and found - is kept under this instead. Handed out by the host, never by a client.
+    /// </summary>
+    public Guid Guid { get; private set; }
     private GrabHandlerItem grabHandler;
     private SnappableItem snappableItem;
     private Component trackedItem;
@@ -195,6 +202,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
             lastState = GetItemState();
             stateDirty = false;
+
+            //Only the host names items. A client's copy is told the name along with the item.
+            if (Guid == Guid.Empty && NetworkLifecycle.Instance.IsHost())
+                Guid = Guid.NewGuid();
 
             initialised = true;
             return true;
@@ -373,10 +384,34 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         return snapshot;
     }
 
+    /// <summary>
+    /// Takes a name that was decided elsewhere. The host uses this for an item it named in advance
+    /// for a client, so both sides end up calling the same thing by the same name.
+    /// </summary>
+    public void AssignGuid(Guid guid)
+    {
+        if (guid != Guid.Empty)
+            Guid = guid;
+    }
+
+    /// <summary>
+    /// Takes the name carried along with an item update. Ignored on the host, which does its own
+    /// naming and must not let a client rename anything.
+    /// </summary>
+    public void SetGuid(Guid guid)
+    {
+        if (NetworkLifecycle.Instance.IsHost())
+            return;
+
+        AssignGuid(guid);
+    }
+
     public void ReceiveSnapshot(ItemUpdateData snapshot)
     {
         if (snapshot == null || snapshot.UpdateType == ItemUpdateData.ItemUpdateType.None)
             return;
+
+        SetGuid(snapshot.Guid);
 
         if (!registrationComplete)
         {
@@ -534,6 +569,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             CarNetId = carId,
             AttachedFront = frontCoupler,
             States = states,
+            Guid = Guid,
         };
 
         return updateData;
