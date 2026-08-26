@@ -400,6 +400,16 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     }
 
     /// <summary>
+    /// Marks this item as one the other side already knows about. An item built from someone
+    /// else's snapshot starts out looking like something nobody has been told about yet, and would
+    /// otherwise be introduced straight back to whoever just introduced it.
+    /// </summary>
+    public void MarkAsKnownElsewhere()
+    {
+        createdDirty = false;
+    }
+
+    /// <summary>
     /// Takes a name that was decided elsewhere. The host uses this for an item it named in advance
     /// for a client, so both sides end up calling the same thing by the same name.
     /// </summary>

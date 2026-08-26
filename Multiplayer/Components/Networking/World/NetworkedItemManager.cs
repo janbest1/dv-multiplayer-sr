@@ -659,6 +659,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         newItem.gameObject.SetActive(true);
         newItem.NetId = snapshot.ItemNetId;
 
+        //This came from the other side's snapshot, so they plainly know about it already
+        newItem.MarkAsKnownElsewhere();
+
         newItem.ReceiveSnapshot(snapshot);
     }
 
@@ -808,6 +811,12 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     private void SendToCache(NetworkedItem netItem)
     {
+        //Unity keeps a destroyed object's reference alive but hollow, and C#'s ?. does not consult
+        //Unity's own idea of null - so reading anything off one throws from native code with no
+        //message at all. A Destroy that names an item already gone is exactly that case.
+        if (netItem == null || netItem.Item == null)
+            return;
+
         //A question about this item may still be in flight; the answer is no longer wanted
         requested.Remove(netItem);
 
