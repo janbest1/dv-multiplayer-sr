@@ -101,6 +101,7 @@ public static class Multiplayer
 
             Log($"\r\n\r\n" +
                 $"\tMultiplayer JSON Version: {ModEntry.Info.Version}, Internal Version: {Ver}\r\n" +
+                $"\tBuilt: {BuildTimestamp()}\r\n" +
                 $"\tGame Version: {gameVer}\r\n" +
                 $"\tBuildbot Version: {BuildInfo.BUILDBOT_INFO.ToString()}\r\n" +
                 $"\tLiteNetLib Version: {LiteNetLibVer()}\r\n" +
@@ -248,6 +249,28 @@ public static class Multiplayer
 
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// When the loaded assembly was written. The mod version stays the same across a day of
+    /// rebuilding, so it cannot tell a fresh build from the one that was in the folder yesterday -
+    /// and a whole test round has gone into diagnosing a binary nobody had replaced.
+    /// </summary>
+    static string BuildTimestamp()
+    {
+        try
+        {
+            string path = Assembly.GetExecutingAssembly().Location;
+
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                return "unknown";
+
+            return File.GetLastWriteTime(path).ToString("yyyy-MM-dd HH:mm:ss");
+        }
+        catch (Exception e)
+        {
+            return $"unknown ({e.Message})";
         }
     }
 
