@@ -12,8 +12,8 @@ namespace Multiplayer.Networking.Managers.Client;
 public class ClientPlayerManager : IDisposable
 {
     private const float CULLING_CHECK_INTERVAL = 2f;
-    private const float CULL_SQR_DISTANCE = 150f * 150f;
-    private const float ACTIVATE_SQR_DISTANCE = 145f * 145f;
+    private const float CULL_SQR_DISTANCE = NetworkedPlayer.CULL_SQR_DISTANCE;
+    private const float ACTIVATE_SQR_DISTANCE = NetworkedPlayer.ACTIVATE_SQR_DISTANCE;
 
     private readonly Dictionary<byte, NetworkedPlayer> playerMap = new();
 

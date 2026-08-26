@@ -276,6 +276,14 @@ public class NetworkedPlayer : MonoBehaviour
         return ping;
     }
 
+    //Beyond this a change of position is a jump, not a step
+    private const float TELEPORT_SQR_DISTANCE = 25f * 25f;
+
+    //How far away a player has to be before we stop drawing them, and how far back in before we
+    //start again. The sweep that applies these lives in ClientPlayerManager.
+    public const float CULL_SQR_DISTANCE = 150f * 150f;
+    public const float ACTIVATE_SQR_DISTANCE = 145f * 145f;
+
     protected void Update()
     {
         if (IsCulled)
@@ -292,10 +300,14 @@ public class NetworkedPlayer : MonoBehaviour
 
         float t = Time.deltaTime * LERP_SPEED;
 
-        Vector3 position = Vector3.Lerp(
-            IsOnCar ? selfTransform.localPosition : selfTransform.position,
-            IsOnCar ? targetPos : targetPos + WorldMover.currentMove,
-            t);
+        Vector3 from = IsOnCar ? selfTransform.localPosition : selfTransform.position;
+        Vector3 to = IsOnCar ? targetPos : targetPos + WorldMover.currentMove;
+
+        //Smoothing is for walking. A player who used the map to travel is somewhere else entirely,
+        //and easing them there sends them gliding across the world - with whatever they are
+        //carrying in tow, far enough from us for the game to decide the item has been lost.
+        bool jumped = (to - from).sqrMagnitude > TELEPORT_SQR_DISTANCE;
+        Vector3 position = jumped ? to : Vector3.Lerp(from, to, t);
 
         // Calculate smoothed head pitch for use in VR and nonVR head positioning and nonVR item positioning
         currentHeadPitch = Mathf.Lerp(currentHeadPitch, targetHeadPitch, t);
@@ -341,7 +353,29 @@ public class NetworkedPlayer : MonoBehaviour
             selfTransform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, t);
         }
 
+        if (jumped)
+            RecheckCulling();
+
         RefreshHeldItemPose();
+    }
+
+    /// <summary>
+    /// Decides there and then whether this player is still close enough to draw. The regular sweep
+    /// only runs every couple of seconds, which is fine for someone walking away and far too slow
+    /// for someone who jumped: for those seconds they stand in full view on the far side of the
+    /// world, and the game is left to conclude that whatever they are carrying has been lost.
+    /// </summary>
+    private void RecheckCulling()
+    {
+        Transform localPlayer = PlayerManager.PlayerTransform;
+
+        if (localPlayer == null)
+            return;
+
+        float sqrDistance = (selfTransform.position - localPlayer.position).sqrMagnitude;
+
+        if (IsCulled ? sqrDistance < ACTIVATE_SQR_DISTANCE : sqrDistance > CULL_SQR_DISTANCE)
+            IsCulled = !IsCulled;
     }
 
     /// <summary>
@@ -578,10 +612,13 @@ public class NetworkedPlayer : MonoBehaviour
         disabledRHItemColliders.Clear();
         foreach (Collider col in itemGo.GetComponentsInChildren<Collider>(true))
         {
-            Multiplayer.LogDebug(() => $"NetworkedPlayer.HoldItem() Collider: {col.name}, Enabled: {col.enabled}, Type: {col.GetType()}");
-            if (col != null && col.enabled)
-                col.enabled = false;
+            //Only the ones we switch off ourselves - putting the item down must not turn on a
+            //collider the item had disabled for its own reasons
+            if (col == null || !col.enabled)
+                continue;
 
+            Multiplayer.LogDebug(() => $"NetworkedPlayer.HoldItem() Collider: {col.name}, Type: {col.GetType()}");
+            col.enabled = false;
             disabledRHItemColliders.Add(col);
         }
 
@@ -617,9 +654,13 @@ public class NetworkedPlayer : MonoBehaviour
         // Re-enable previously disabled colliders
         foreach (Collider col in disabledRHItemColliders)
         {
+            //The item may be long gone. Reading a name off a destroyed object throws from native
+            //code, and the log line asking for it did exactly that before the check below.
+            if (col == null)
+                continue;
+
             Multiplayer.LogDebug(() => $"NetworkedPlayer.DropItem() Re-enabling collider: {col.name}, Type: {col.GetType()}");
-            if (col != null)
-                col.enabled = true;
+            col.enabled = true;
         }
         disabledRHItemColliders.Clear();
 

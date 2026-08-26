@@ -225,9 +225,18 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
         foreach (var item in NetworkedItem.GetAll())
         {
-            ItemUpdateData snapshot = item.GetSnapshot();
-            if (snapshot != null)
-                dirtyItems.Add(snapshot);
+            //One item that cannot answer for itself must not silence every other item. A throw here
+            //used to abort the whole tick, and with it all item sync for as long as it kept coming.
+            try
+            {
+                ItemUpdateData snapshot = item.GetSnapshot();
+                if (snapshot != null)
+                    dirtyItems.Add(snapshot);
+            }
+            catch (Exception ex)
+            {
+                NetworkLifecycle.Instance.Server.LogError($"ProcessChanged({tick}) Item {item?.NetId} ({(item == null ? "gone" : item.name)}) failed: {ex.Message}\r\n{ex.StackTrace}");
+            }
         }
 
         if (dirtyItems.Count > 0)
@@ -595,10 +604,15 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 continue;
             }
 
-            ItemUpdateData snapshot = item.GetSnapshot();
-            if (snapshot != null)
+            try
             {
-                changedItems.Add(snapshot);
+                ItemUpdateData snapshot = item.GetSnapshot();
+                if (snapshot != null)
+                    changedItems.Add(snapshot);
+            }
+            catch (Exception ex)
+            {
+                NetworkLifecycle.Instance.Client.LogError($"ProcessClientChanges({tick}) Item {item?.NetId} ({(item == null ? "gone" : item.name)}) failed: {ex.Message}\r\n{ex.StackTrace}");
             }
         }
 

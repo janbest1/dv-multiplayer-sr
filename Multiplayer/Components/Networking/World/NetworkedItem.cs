@@ -1137,10 +1137,12 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         ReleaseFromRemoteHand();
 
-        //Only one item fits in the hand we model, whatever was there goes out of sight
-        if (holder.RightHandItemGO != null && holder.RightHandItemGO != gameObject)
+        //Only one item fits in the hand we model, whatever was there goes out of sight. It may also
+        //be gone by now, in which case there is nothing to hide - but the hand still has to let go.
+        GameObject previousGo = holder.RightHandItemGO;
+        if (!ReferenceEquals(previousGo, null) && previousGo != gameObject)
         {
-            NetworkedItem previous = holder.RightHandItemGO.GetComponent<NetworkedItem>();
+            NetworkedItem previous = previousGo == null ? null : previousGo.GetComponent<NetworkedItem>();
             holder.DropItem();
 
             if (previous != null)
