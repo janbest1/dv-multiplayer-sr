@@ -449,6 +449,14 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     #region Naming Items A Client Built Itself
 
+    /// <summary>
+    /// Whether this client is done joining. Before that the world it loaded for itself is still
+    /// being replaced by the host's, and nothing local can be taken at face value.
+    /// </summary>
+    private static bool HasJoined =>
+        NetworkLifecycle.Instance.Client != null &&
+        NetworkLifecycle.Instance.Client.LoadingState == PlayerLoadingState.Complete;
+
     private uint nextRequestId = 1;
     private readonly Dictionary<uint, NetworkedItem> awaitingRegistration = new Dictionary<uint, NetworkedItem>();
     private readonly HashSet<NetworkedItem> requested = new HashSet<NetworkedItem>();
@@ -527,19 +535,27 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             if (item == null)
                 continue;
 
-            //Joining puts every item this client's own world spawned into the cache: switched off,
-            //waiting to stand in for something the host names later. Those are not in the world and
-            //must not be named - one join asked the host to name 766 office props, of which five
-            //were ever introduced.
+            //Spare parts, waiting to stand in for something the host names later
             if (IsCached(item))
                 continue;
 
-            //Ids belong to the host. Anything this client brought into the world itself - bought,
-            //taken back out of the lost and found, carried in its own inventory - starts at zero,
-            //and the host throws away every word said about item zero. Ask for a name, and stay
-            //quiet until it arrives rather than filling the wire with updates nobody can act on.
             if (item.NetId == 0)
             {
+                //Until this client has finished joining, anything without a name is a leftover of
+                //the world it loaded for itself - the host is about to send its own set of the very
+                //same things. CacheWorldItems sweeps those up, but it runs the moment loading
+                //finishes and the world spawns its items a fraction of a second later, so it walks
+                //an almost empty list and the leftovers live on. Put them aside here instead.
+                if (!HasJoined && IsOwnWorldItem(item))
+                {
+                    SendToCache(item);
+                    continue;
+                }
+
+                //Past that point a nameless item is something this player really did bring into the
+                //world - bought, taken out of the lost and found, carried in from their own save.
+                //Ids belong to the host, and the host throws away every word said about item zero,
+                //so ask for a name and stay quiet until it arrives.
                 RequestRegistration(item);
                 continue;
             }
@@ -564,6 +580,15 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         NetworkLifecycle.Instance.Client.LogDebug(() => $"NetworkedItemManager.ProcessReceivedAsClient() Update Type: {snapshot?.UpdateType}, ItemNetId: {snapshot?.ItemNetId}, prefabName: {snapshot?.PrefabName}");
         if (snapshot.UpdateType == ItemUpdateData.ItemUpdateType.Create)
         {
+            //The host introduces back to us what we introduced to it, and the item is already here,
+            //in this player's hand or in mid-flight. Building a replacement snatches it away: a
+            //thrown map vanished on the first throw and only behaved on the second.
+            if (netItem != null && netItem.Guid != Guid.Empty && netItem.Guid == snapshot.Guid)
+            {
+                netItem.ReceiveSnapshot(snapshot);
+                return;
+            }
+
             //if the item already exists we need to remove it
             if (netItem != null)
                 SendToCache(netItem);
@@ -679,6 +704,20 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         Multiplayer.Log(sb.ToString());
     }
 
+    /// <summary>
+    /// Whether this is scenery the client's own world spawned, as opposed to something the player
+    /// is holding or carrying. Only the scenery is replaced wholesale by the host's set; what the
+    /// player brought with them stays theirs and gets a name of its own.
+    /// </summary>
+    private static bool IsOwnWorldItem(NetworkedItem netItem)
+    {
+        return netItem != null
+            && netItem.Item != null
+            && !netItem.Item.IsEssential()
+            && !netItem.Item.IsGrabbed()
+            && !StorageController.Instance.StorageInventory.ContainsItem(netItem.Item);
+    }
+
     public void CacheWorldItems()
     {
         if (NetworkLifecycle.Instance.IsHost())
@@ -689,7 +728,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         {
             try
             {
-                if (item.Item != null && !item.Item.IsEssential() && !item.Item.IsGrabbed() && !StorageController.Instance.StorageInventory.ContainsItem(item.Item))
+                if (IsOwnWorldItem(item))
                 {
                     SendToCache(item);
                 }
@@ -703,6 +742,8 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 NetworkLifecycle.Instance.Client.LogError($"Error Caching Spawned Item: {ex.Message}");
             }
         }
+
+        NetworkLifecycle.Instance.Client.Log($"Cached {inCache.Count} of {NetworkedItem.GetAll().Count} world items");
 
         ClientInitialised = true;
     }
