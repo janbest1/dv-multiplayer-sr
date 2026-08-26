@@ -499,6 +499,14 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
         requested.Remove(netItem);
 
+        if (IsCached(netItem))
+        {
+            //It went into the cache while the question was in flight. A spare part must stay
+            //nameless, or the host is left waiting for an introduction that never comes.
+            Multiplayer.LogDebug(() => $"NetworkedItemManager.ItemRegistered() item {netId} went into the cache, dropping the name");
+            return;
+        }
+
         netItem.NetId = netId;
         netItem.AssignGuid(guid);
 
@@ -519,10 +527,17 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             if (item == null)
                 continue;
 
+            //Joining puts every item this client's own world spawned into the cache: switched off,
+            //waiting to stand in for something the host names later. Those are not in the world and
+            //must not be named - one join asked the host to name 766 office props, of which five
+            //were ever introduced.
+            if (IsCached(item))
+                continue;
+
             //Ids belong to the host. Anything this client brought into the world itself - bought,
-            //loaded from its own save, taken back out of the cache - starts at zero, and the host
-            //throws away every word said about item zero. Ask for a name, and stay quiet until
-            //it arrives rather than filling the wire with updates nobody can act on.
+            //taken back out of the lost and found, carried in its own inventory - starts at zero,
+            //and the host throws away every word said about item zero. Ask for a name, and stay
+            //quiet until it arrives rather than filling the wire with updates nobody can act on.
             if (item.NetId == 0)
             {
                 RequestRegistration(item);
@@ -692,6 +707,18 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         ClientInitialised = true;
     }
 
+    //Everything sitting in the cache, so it can be recognised in one step. Walking the lists per
+    //item per tick would be work for nothing, and the answer is needed for every item every tick.
+    private readonly HashSet<NetworkedItem> inCache = new HashSet<NetworkedItem>();
+
+    /// <summary>
+    /// Whether this is a spare part waiting to be reused rather than something in the world.
+    /// </summary>
+    public bool IsCached(NetworkedItem netItem)
+    {
+        return netItem != null && inCache.Contains(netItem);
+    }
+
     private NetworkedItem GetFromCache(string prefabName)
     {
         if (CachedItems.TryGetValue(prefabName, out var items) && items.Count > 0)
@@ -699,6 +726,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
             var cachedItem = items[items.Count - 1];
             items.RemoveAt(items.Count - 1);
+
+            inCache.Remove(cachedItem);
+
             return cachedItem;
         }
 
@@ -707,6 +737,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     private void SendToCache(NetworkedItem netItem)
     {
+        //A question about this item may still be in flight; the answer is no longer wanted
+        requested.Remove(netItem);
+
         string prefabName = netItem?.Item?.InventorySpecs?.itemPrefabName;
 
         //NetworkLifecycle.Instance.Client.LogDebug(() => $"Caching Spawned Item: {prefabName ?? ""}");
@@ -745,6 +778,8 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             CachedItems[prefabName] = new List<NetworkedItem>();
         }
         CachedItems[prefabName].Add(netItem);
+
+        inCache.Add(netItem);
     }
 
     #endregion
