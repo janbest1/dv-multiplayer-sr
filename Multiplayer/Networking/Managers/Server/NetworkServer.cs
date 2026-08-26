@@ -1331,7 +1331,11 @@ public class NetworkServer : NetworkManager
 
                 //Tell them what is already bolted onto the cars. Their own save put gadgets there
                 //under UIDs nobody else knows, and nothing they did to those ever reached anyone.
-                foreach (CommonGadgetPacket gadgetPacket in NetworkedGadgets.DescribeAll())
+                List<CommonGadgetPacket> attachedGadgets = NetworkedGadgets.DescribeAll();
+
+                Log($"Sending {attachedGadgets.Count} attached gadgets to {player.Username}");
+
+                foreach (CommonGadgetPacket gadgetPacket in attachedGadgets)
                     SendNetSerializablePacket(player.Peer, gadgetPacket, DeliveryMethod.ReliableOrdered);
 
                 break;
