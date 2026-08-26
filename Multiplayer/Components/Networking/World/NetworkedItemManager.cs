@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using DV.Utils;
@@ -329,6 +329,16 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
         if (NetworkedItem.TryGet(snapshot.ItemNetId, out NetworkedItem netItem))
         {
+            //While a part is bolted onto a car it is the gadget, and where its item would be lying
+            //means nothing. Acting on such a report puts a loose copy of the part back in the world
+            //beside the one on the car. The detach always arrives before anything that follows it.
+            if (!snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.Destroy) &&
+                NetworkedGadgets.IsInstalledGadget(netItem.Item))
+            {
+                NetworkLifecycle.Instance.Server.LogDebug(() => $"NetworkedItemManager.ProcessReceivedAsHost() ignoring {snapshot.UpdateType} for ItemNetId: {snapshot.ItemNetId}, it is bolted onto a car");
+                return;
+            }
+
             if (ValidatePlayerAction(snapshot, player)) //Ensure the player can do this
             {
                 NetworkLifecycle.Instance.Server.LogDebug(() => $"NetworkedItemManager.ProcessReceivedAsHost() ItemNetId: {snapshot.ItemNetId}, snapshot type: {snapshot.UpdateType}");
@@ -404,6 +414,12 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
         foreach (var item in NetworkedItem.GetAll())
         {
+            //An item bolted onto a car is not lying in the world any more, it is the gadget. Telling
+            //the host otherwise puts a loose copy of the part back wherever the item last was, right
+            //next to the one that is now bolted on. The host's own loop already leaves these out.
+            if (item == null || NetworkedGadgets.IsInstalledGadget(item.Item) || NetworkedItemStorage.IsStowed(item.Item))
+                continue;
+
             ItemUpdateData snapshot = item.GetSnapshot();
             if (snapshot != null)
             {
