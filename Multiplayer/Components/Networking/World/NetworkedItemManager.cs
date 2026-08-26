@@ -727,9 +727,11 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     /// </summary>
     private static bool IsOwnWorldItem(NetworkedItem netItem)
     {
+        //What the player is holding or carrying stays theirs. Everything else standing in the world
+        //is the client's own copy of scenery the host is about to send its version of - shop
+        //equipment included. Leaving those out left a second scanner on every shop counter.
         return netItem != null
             && netItem.Item != null
-            && !netItem.Item.IsEssential()
             && !netItem.Item.IsGrabbed()
             && !StorageController.Instance.StorageInventory.ContainsItem(netItem.Item);
     }
@@ -760,6 +762,18 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         }
 
         NetworkLifecycle.Instance.Client.Log($"Cached {inCache.Count} of {NetworkedItem.GetAll().Count} world items");
+
+        //Whatever is left is either in the player's hands or their bag. Anything else here is
+        //something the sweep could not account for, and it will end up beside the host's copy.
+        Multiplayer.LogDebug(() =>
+        {
+            List<string> kept = NetworkedItem.GetAll()
+                .Where(item => item != null && !IsCached(item))
+                .Select(item => item.Item?.InventorySpecs?.ItemPrefabName ?? item.name)
+                .ToList();
+
+            return $"CacheWorldItems() kept {kept.Count}: {string.Join(", ", kept)}";
+        });
 
         ClientInitialised = true;
     }

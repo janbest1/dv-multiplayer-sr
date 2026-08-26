@@ -64,6 +64,12 @@ public class CashRegisterWithModulesPatch
             return;
         }
 
+        //A shop basket is one player's shopping, not a shared state. Telling everyone about a
+        //purchase empties the basket each of them was filling. What they buy reaches the others as
+        //an item, which is the only part of it the world needs to agree on.
+        if (netCashRegister.IsShopRegister)
+            return;
+
         // Send buy action to all clients
         NetworkLifecycle.Instance.Server.SendCashRegisterAction(new CommonCashRegisterWithModulesActionPacket
         {

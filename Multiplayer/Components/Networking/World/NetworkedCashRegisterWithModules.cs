@@ -123,6 +123,10 @@ public class NetworkedCashRegisterWithModules : IdMonoBehaviour<ushort, Networke
 
     private void CullingManager_PlayerEnteredActivationRegion(ServerPlayer serverPlayer)
     {
+        //Nobody else's shopping is any of this player's business
+        if (IsShopRegister)
+            return;
+
         if (CashRegister.DepositedCash > 0f)
         {
             NetworkLifecycle.Instance.Server.SendCashRegisterAction
@@ -242,6 +246,14 @@ public class NetworkedCashRegisterWithModules : IdMonoBehaviour<ushort, Networke
     public void Client_ProcessCashRegisterAction(CashRegisterAction action, double amount)
     {
         NetworkLifecycle.Instance.Client?.LogDebug(() => $"NetworkedCashRegisterWithModules.Client_ProcessCashRegisterAction({action}, {amount}) isBuying: {isBuying}, isCancelling: {isCancelling}");
+
+        //A shop register is this player's own. Acting on someone else's purchase here would clear
+        //the basket they are standing in front of.
+        if (IsShopRegister)
+        {
+            Multiplayer.LogDebug(() => $"NetworkedCashRegisterWithModules.Client_ProcessCashRegisterAction({action}) ignored, this is a shop register");
+            return;
+        }
         switch (action)
         {
             case CashRegisterAction.Cancel:
