@@ -266,13 +266,19 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                         continue;
                     }
 
+                    //Job paperwork is introduced by the station that prints it, with the id that
+                    //goes with the job. Sending it a second time from here builds a plain copy
+                    //over the top of that one. The check asked the wrapper what type it was,
+                    //which is always NetworkedItem, so it never once matched.
+                    if (DoNotCreateItem(nearbyItem.TrackedItemType))
+                        continue;
+
                     // This is a new item for the player
                     NetworkLifecycle.Instance.Server.LogDebug(() => $"ProcessChanged({tick}) New item for: {player.Username}, itemNetID{nearbyItem.NetId}");
 
                     ItemUpdateData snapshot = nearbyItem.CreateUpdateData(ItemUpdateData.ItemUpdateType.Create);
 
-                    //prevent propagation of creates for special items
-                    if(!DoNotCreateItem(nearbyItem.GetType()))
+                    if (snapshot != null)
                         playerUpdates.Add(snapshot);
                 }
                 else

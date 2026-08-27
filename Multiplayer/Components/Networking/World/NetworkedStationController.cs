@@ -500,6 +500,8 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
                     JobBooklet jobBooklet = BookletCreator.CreateJobBooklet(netJob.Job, validator.bookletPrinter.spawnAnchor.position, validator.bookletPrinter.spawnAnchor.rotation, WorldMover.OriginShiftParent, true);
                     netItem = jobBooklet.GetOrAddComponent<NetworkedItem>();
                     netItem.Initialize(jobBooklet, updateData.ItemNetID, false);
+                    netItem.FinaliseTrackedValues();
+                    netItem.FinaliseTrackedValues();
                     netJob.JobBooklet = netItem;
                     printed = true;
                 }
@@ -519,6 +521,8 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
                     JobReport jobReport = BookletCreator.CreateJobReport(netJob.Job, displayableDebt, validator.bookletPrinter.spawnAnchor.position, validator.bookletPrinter.spawnAnchor.rotation, WorldMover.OriginShiftParent);
                     netItem = jobReport.GetOrAddComponent<NetworkedItem>();
                     netItem.Initialize(jobReport, updateData.ItemNetID, false);
+                    netItem.FinaliseTrackedValues();
+                    netItem.FinaliseTrackedValues();
                     netJob.AddReport(netItem);
                     printed = true;
                 }
@@ -625,6 +629,8 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
 
         NetworkedItem netItem = jobOverview.GetOrAddComponent<NetworkedItem>();
         netItem.Initialize(jobOverview, itemNetId, false);
+        netItem.FinaliseTrackedValues();
+        netItem.FinaliseTrackedValues();
         networkedJob.JobOverview = netItem;
         StationController.spawnedJobOverviews.Add(jobOverview);
     }

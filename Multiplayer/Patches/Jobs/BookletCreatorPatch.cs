@@ -28,6 +28,7 @@ public static class BookletCreator_Patch
         {
             NetworkedItem netItem = __result.GetOrAddComponent<NetworkedItem>();
             netItem.Initialize(__result, 0, false);
+            netItem.FinaliseTrackedValues();
             networkedJob.JobOverview =  netItem;
         }
     }
@@ -47,6 +48,7 @@ public static class BookletCreator_Patch
         {
             NetworkedItem netItem = __result.GetOrAddComponent<NetworkedItem>();
             netItem.Initialize(__result, 0, false);
+            netItem.FinaliseTrackedValues();
             networkedJob.JobBooklet = netItem;
         }
     }
@@ -66,6 +68,7 @@ public static class BookletCreator_Patch
         {
             NetworkedItem netItem = __result.GetOrAddComponent<NetworkedItem>();
             netItem.Initialize(__result, 0, false);
+            netItem.FinaliseTrackedValues();
             networkedJob.JobReport = netItem;
         }
     }
