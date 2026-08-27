@@ -115,6 +115,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private ushort lastCarNetId;
     private Coroutine deferredOnCar;
 
+    //The item this one was last stowed inside, if any
+    private ItemContainer lastContainer;
+
     //Set while we are only mirroring this item in another player's hand
     private NetworkedPlayer remoteHolder;
 
@@ -375,6 +378,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (pendingContainer != null)
         {
             HandleInContainerState(pendingContainer);
+
+            //Whether it went in or is still waiting, that was us acting on what we were told
+            SyncStateTracking();
             MarkValuesClean();
             return null;
         }
@@ -382,6 +388,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //The game re-parents items without raising an event (e.g. an item put down in a loco cab),
         //so a change of parent is treated as a possible state change.
         bool parentChanged = RefreshParentCar();
+
+        //An item put inside another one gives nothing away by itself: no event we listen for, the
+        //same parent as before, and it is switched off on the way in - which alone would bar it
+        //from reporting a state change further down. So the container is watched in its own right,
+        //and a change of one counts as a change of state outright.
+        if (RefreshContainer())
+            stateDirty = true;
 
         //Putting an item down counts as a throw, so a thrown item is still in flight. Keep
         //evaluating it until it comes to rest, otherwise it never leaves the Thrown state.
@@ -579,6 +592,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     private void SyncStateTracking()
     {
         RefreshParentCar(true);
+        RefreshContainer();
         lastState = GetItemState();
         lastCarNetId = lastState == ItemState.OnCar ? parentCar.GetNetId() : (ushort)0;
     }
@@ -1201,6 +1215,21 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         mirroredState = null;
 
         Multiplayer.LogDebug(() => $"NetworkedItem.HandleInContainerState() NetId: {NetId}, name: {name} stowed in {holder.name} ({snapshot.ContainerNetId}), slot {snapshot.ContainerSlot}");
+    }
+
+    /// <summary>
+    /// Notices the item being put inside another one, or taken back out.
+    /// </summary>
+    /// <returns>True if that changed since the last call.</returns>
+    private bool RefreshContainer()
+    {
+        ItemContainer current = Item == null ? null : Item.InContainer;
+
+        if (current == lastContainer)
+            return false;
+
+        lastContainer = current;
+        return true;
     }
 
     /// <summary>
