@@ -177,9 +177,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (!initialised)
             Register();
 
-        // Mark registration as complete for items that don't need tracked values
+        //An item with no tracked values of its own has nothing left to wait for. Whatever it was
+        //told before now is still sitting in the queue: an item is handed its first snapshot in
+        //the same frame it is built, which is before this runs. Declaring registration finished
+        //without emptying the queue threw that snapshot away - the one carrying where the item
+        //is and what it is doing.
         if (!registrationComplete && !UsefulItem)
-            registrationComplete = true;
+            FinaliseTrackedValues();
     }
 
     public T GetTrackedItem<T>() where T : Component
