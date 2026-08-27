@@ -123,6 +123,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     //What that player is doing with it, so we don't read it back off our own copy
     private ItemState? mirroredState;
 
+    //When the item first looked stowed, and how long it has to keep looking that way to be believed
+    private float stowedSince;
+    private const float STOW_SETTLE_TIME = 0.5f;
+
     //Handle ownership
     public sbyte OwnerId { get; private set; } = -1; // 0 means no owner
 
@@ -378,6 +382,24 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return null;
 
         ItemState currentState = GetItemState();
+
+        //A tool in use lets go of the hand for a moment at a time - the soldering iron does it
+        //several times a second while it is pointed at something. Taken at face value that reads as
+        //the item being put away and pulled out again, and everyone else watches it blink in and out
+        //of the hand holding it. Being put away is only believed once it has held for a moment;
+        //being taken out is not, so picking something up still shows straight away.
+        if (lastState == ItemState.InHand && currentState == ItemState.InInventory)
+        {
+            if (stowedSince <= 0f)
+                stowedSince = Time.time;
+
+            if (Time.time - stowedSince < STOW_SETTLE_TIME)
+                currentState = ItemState.InHand;
+        }
+        else
+        {
+            stowedSince = 0f;
+        }
 
         //Items stowed in another player's inventory are deactivated for us, we must not report
         //state for those. Items in another player's hand are caught by the remoteHolder check above.
