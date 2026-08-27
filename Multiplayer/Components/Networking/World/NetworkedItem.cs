@@ -23,7 +23,8 @@ public enum ItemState : byte
     InHand,         //held by player
     InInventory,    //in player's inventory
     Attached,       //attached to another object (e.g. EOT Lanterns)
-    OnCar           //resting on/in a train car (e.g. an item left in a loco cab)
+    OnCar,          //resting on/in a train car (e.g. an item left in a loco cab)
+    InContainer     //stowed inside another item (e.g. a reel of solder in a soldering iron)
 }
 
 public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
@@ -126,6 +127,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     //When the item first looked stowed, and how long it has to keep looking that way to be believed
     private float stowedSince;
     private const float STOW_SETTLE_TIME = 0.5f;
+
+    //A stowing we have been told about but cannot carry out yet, because the item it belongs inside
+    //has not reached us
+    private ItemUpdateData pendingContainer;
 
     //Handle ownership
     public sbyte OwnerId { get; private set; } = -1; // 0 means no owner
@@ -366,6 +371,14 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return null;
         }
 
+        //Something we were told to stow but had nowhere to put yet
+        if (pendingContainer != null)
+        {
+            HandleInContainerState(pendingContainer);
+            MarkValuesClean();
+            return null;
+        }
+
         //The game re-parents items without raising an event (e.g. an item put down in a loco cab),
         //so a change of parent is treated as a possible state change.
         bool parentChanged = RefreshParentCar();
@@ -525,6 +538,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
                     HandleOnCarState(snapshot);
                     break;
 
+                case ItemState.InContainer:
+                    HandleInContainerState(snapshot);
+                    break;
+
                 default:
                     throw new Exception($"NetworkedItem.ApplySnapshot() Item state not implemented: {snapshot?.ItemState}");
 
@@ -579,6 +596,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         Dictionary<string, object> states;
         ushort carId = 0;
         bool frontCoupler = true;
+        ushort containerId = 0;
+        byte containerIndex = 0;
 
         if (wasThrown)
         {
@@ -610,6 +629,22 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             {
                 carId = itemSnapPointCoupler.Car.GetNetId();
                 frontCoupler = itemSnapPointCoupler.IsFront;
+            }
+        }
+        else if (itemState == ItemState.InContainer)
+        {
+            ResolveContainer(out ushort containerNetId, out byte containerSlot);
+
+            if (containerNetId == 0)
+            {
+                //Nothing anyone else could look up, so it is no use saying it is in there
+                Multiplayer.LogWarning($"NetworkedItem.CreateUpdateData({updateType}) NetId: {NetId}, name: {name}. Container has no netId, sending a world position");
+                itemState = ItemState.Dropped;
+            }
+            else
+            {
+                containerId = containerNetId;
+                containerIndex = containerSlot;
             }
         }
         else if (itemState == ItemState.OnCar)
@@ -650,6 +685,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             ThrowDirection = throwDirection,
             CarNetId = carId,
             AttachedFront = frontCoupler,
+            ContainerNetId = containerId,
+            ContainerSlot = containerIndex,
             States = states,
             Guid = Guid,
         };
@@ -663,6 +700,15 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //it is parented to. Reading it off the transform would call it dropped on the spot.
         if (mirroredState.HasValue)
             return mirroredState.Value;
+
+        //An item stowed inside another one is parented to the world like anything lying on the
+        //ground, so this has to be settled before the transform is consulted - otherwise a reel of
+        //solder in someone's soldering iron reads as a reel of solder on the floor.
+        if (Item.InContainer != null)
+        {
+            Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, in container {Item.InContainer.name}");
+            return ItemState.InContainer;
+        }
 
         RefreshParentCar();
 
@@ -865,10 +911,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void HandleDroppedOrThrownState(ItemUpdateData snapshot)
     {
-        //it may have been in another player's hand
+        //it may have been in another player's hand, or stowed inside something
         heldByRemote = 0;
         mirroredState = null;
         ReleaseFromRemoteHand();
+        LeaveContainer();
 
         //resolve attachment
         if (Item.IsSnapped)
@@ -910,10 +957,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void HandleAttachedState(ItemUpdateData snapshot)
     {
-        //it may have been in another player's hand
+        //it may have been in another player's hand, or stowed inside something
         heldByRemote = 0;
         mirroredState = null;
         ReleaseFromRemoteHand();
+        LeaveContainer();
 
         //resovle ownership
         if (NetworkLifecycle.Instance.IsHost())
@@ -950,10 +998,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     private void HandleOnCarState(ItemUpdateData snapshot)
     {
-        //it may have been in another player's hand
+        //it may have been in another player's hand, or stowed inside something
         heldByRemote = 0;
         mirroredState = null;
         ReleaseFromRemoteHand();
+        LeaveContainer();
 
         //resolve attachment
         if (Item.IsSnapped)
@@ -1075,6 +1124,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //It may have been parked while it rode along on a car
         SetRidingPhysics(false);
 
+        //Or stowed inside something the player is carrying
+        LeaveContainer();
+
         if (NetworkLifecycle.Instance.IsHost())
             if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(snapshot.Player, out ServerPlayer player) && !player.OwnsItem(NetId))
                 player.AddOwnedItem(NetId);
@@ -1086,6 +1138,113 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //Stowed, or held by someone we can't see - out of sight either way
         ReleaseFromRemoteHand();
         this.gameObject.SetActive(false);
+    }
+
+    private void HandleInContainerState(ItemUpdateData snapshot)
+    {
+        heldByRemote = 0;
+        mirroredState = null;
+        ReleaseFromRemoteHand();
+
+        if (Item.IsSnapped)
+            Item.SnappableItem.SnappedTo.UnsnapItem(false);
+
+        SetRidingPhysics(false);
+
+        if (!NetworkedItem.TryGet(snapshot.ContainerNetId, out NetworkedItem holder) || holder == null || holder.Item == null)
+        {
+            //It may simply not have reached us yet - the reel can arrive before the iron it goes
+            //in. Nothing about the item changes again for its owner to mention, so this has to be
+            //picked up again rather than waited on.
+            if (pendingContainer == null)
+                Multiplayer.LogDebug(() => $"NetworkedItem.HandleInContainerState() ItemNetId: {snapshot.ItemNetId}. Waiting for item {snapshot.ContainerNetId} to hold it");
+
+            pendingContainer = snapshot;
+            mirroredState = ItemState.InContainer;
+            gameObject.SetActive(false);
+            return;
+        }
+
+        pendingContainer = null;
+
+        ItemContainer container = holder.GetComponentInChildren<ItemContainer>(true);
+
+        if (container == null)
+        {
+            Multiplayer.LogWarning($"NetworkedItem.HandleInContainerState() ItemNetId: {snapshot.ItemNetId}. Item {snapshot.ContainerNetId} ({holder.name}) holds nothing");
+            return;
+        }
+
+        //Already in there, in the right slot
+        if (snapshot.ContainerSlot < container.Capacity && container[snapshot.ContainerSlot] == gameObject)
+        {
+            mirroredState = null;
+            return;
+        }
+
+        LeaveContainer();
+
+        //The slot may be taken by our own copy of something else. The owner will say where that
+        //went soon enough; for now it has to make room.
+        if (snapshot.ContainerSlot < container.Capacity && container[snapshot.ContainerSlot] != null)
+            container.RemoveItem(snapshot.ContainerSlot, true, false);
+
+        gameObject.SetActive(true);
+
+        if (!container.AddItem(gameObject, snapshot.ContainerSlot))
+        {
+            Multiplayer.LogWarning($"NetworkedItem.HandleInContainerState() ItemNetId: {snapshot.ItemNetId}. {holder.name} would not take it in slot {snapshot.ContainerSlot}");
+            return;
+        }
+
+        //It really is in there now, so the transform tells the truth again
+        mirroredState = null;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.HandleInContainerState() NetId: {NetId}, name: {name} stowed in {holder.name} ({snapshot.ContainerNetId}), slot {snapshot.ContainerSlot}");
+    }
+
+    /// <summary>
+    /// Finds the item this one is stowed inside, and which of its slots it occupies.
+    /// </summary>
+    private void ResolveContainer(out ushort containerNetId, out byte containerSlot)
+    {
+        containerNetId = 0;
+        containerSlot = 0;
+
+        ItemContainer container = Item.InContainer;
+
+        if (container == null || container.ItemBase == null)
+            return;
+
+        if (!TryGetNetworkedItem(container.ItemBase, out NetworkedItem holder) || holder == null)
+            return;
+
+        containerNetId = holder.NetId;
+
+        for (int i = 0; i < container.Capacity && i < byte.MaxValue; i++)
+        {
+            if (container[i] == gameObject)
+            {
+                containerSlot = (byte)i;
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Takes the item back out of whatever it is stowed inside. Safe to call when it isn't in one.
+    /// </summary>
+    private void LeaveContainer()
+    {
+        pendingContainer = null;
+
+        ItemContainer container = Item == null ? null : Item.InContainer;
+
+        if (container == null)
+            return;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.LeaveContainer() NetId: {NetId}, name: {name}, out of {container.name}");
+        container.RemoveItem(gameObject, true, false);
     }
 
     /// <summary>

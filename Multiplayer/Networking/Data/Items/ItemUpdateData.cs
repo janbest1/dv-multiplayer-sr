@@ -31,6 +31,13 @@ public class ItemUpdateData
     public byte Player { get; set; }
     public ushort CarNetId { get; set; }
     public bool AttachedFront  { get; set; }
+
+    /// <summary>
+    /// The item this one is stowed inside, and the slot it sits in - a reel of solder in a
+    /// soldering iron's magazine, say.
+    /// </summary>
+    public ushort ContainerNetId { get; set; }
+    public byte ContainerSlot { get; set; }
     public Dictionary<string, object> States { get; set; }
 
     /// <summary>
@@ -73,6 +80,11 @@ public class ItemUpdateData
             {
                 writer.Put(CarNetId);
                 writer.Put(AttachedFront);
+            }
+            else if (ItemState == ItemState.InContainer)
+            {
+                writer.Put(ContainerNetId);
+                writer.Put(ContainerSlot);
             }
             else if (ItemState == ItemState.OnCar)
             {
@@ -139,6 +151,11 @@ public class ItemUpdateData
             {
                 CarNetId = reader.GetUShort();
                 AttachedFront = reader.GetBool();
+            }
+            else if (ItemState == ItemState.InContainer)
+            {
+                ContainerNetId = reader.GetUShort();
+                ContainerSlot = reader.GetByte();
             }
             else if (ItemState == ItemState.OnCar)
             {
