@@ -43,21 +43,32 @@ public static class RespawnOnDrop_CheckDistances_Patch
             return;
         }
 
-        __result.Item2 = !AnyPlayerNear(__instance.transform.position);
+        __result.Item2 = !AnyPlayerNear(__instance.transform.position, SqrRange(__instance));
     }
 
     /// <summary>
-    /// Whether anyone at all is close enough to the item for it to stay where it is.
+    /// How close a player has to be for the item to stay where it is.
+    ///
+    /// Every item carries its own idea of that, and they differ by a lot: two hundred metres for
+    /// something of the player's own, a kilometre for anything else. Asking about all of them at
+    /// the shorter distance took a crate away five times sooner than the game ever would, so an
+    /// item's own answer is the one used, and the setting only ever widens it.
     /// </summary>
-    private static bool AnyPlayerNear(Vector3 position)
+    private static float SqrRange(RespawnOnDrop respawnOnDrop)
     {
         float range = DEFAULT_RANGE;
 
         if (Multiplayer.Settings != null && Multiplayer.Settings.LostItemRange >= MIN_RANGE)
             range = Multiplayer.Settings.LostItemRange;
 
-        float sqrRange = range * range;
+        return Mathf.Max(respawnOnDrop.maxDistanceSquared, range * range);
+    }
 
+    /// <summary>
+    /// Whether anyone at all is close enough to the item for it to stay where it is.
+    /// </summary>
+    private static bool AnyPlayerNear(Vector3 position, float sqrRange)
+    {
         //On a listen server the host is a player like any other, but on a dedicated one there is
         //nobody here at all, so both have to be asked
         Transform localPlayer = PlayerManager.PlayerTransform;
