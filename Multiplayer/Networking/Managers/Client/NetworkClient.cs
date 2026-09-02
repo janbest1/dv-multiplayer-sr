@@ -475,6 +475,10 @@ public class NetworkClient : NetworkManager
 
     #region Listeners
 
+    //What we last hung on the game's own loading event. It is static and outlives us, so the last
+    //one has to come off before the next goes on.
+    private static Action loadingFinished;
+
     private void OnClientboundLoginResponsePacket(ClientboundLoginResponsePacket packet)
     {
         if (packet.Accepted)
@@ -498,8 +502,17 @@ public class NetworkClient : NetworkManager
             // Request Game Params and Save Game Data
             SendLoadStateUpdate(PlayerLoadingState.ReadyForGameData);
 
-            WorldStreamingInit.LoadingFinished += () =>
+            //Joining again in the same run used to leave the last one's handler behind, and the
+            //game's own event is static: after five attempts the world was synced five times over,
+            //everything swept into the cache five times, every entry in the log five deep.
+            if (loadingFinished != null)
+                WorldStreamingInit.LoadingFinished -= loadingFinished;
+
+            loadingFinished = () =>
             {
+                WorldStreamingInit.LoadingFinished -= loadingFinished;
+                loadingFinished = null;
+
                 LogDebug(() => "Loading finished, beginning sync");
                 CoroutineManager.Instance.StartCoroutine(SyncWorldState());
 
@@ -516,6 +529,8 @@ public class NetworkClient : NetworkManager
                     }
                 }
             };
+
+            WorldStreamingInit.LoadingFinished += loadingFinished;
 
             return;
         }

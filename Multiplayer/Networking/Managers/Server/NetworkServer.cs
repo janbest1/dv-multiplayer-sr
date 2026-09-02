@@ -2154,6 +2154,9 @@ public class NetworkServer : NetworkManager
 
     public int PendingStorageReports => awaitingStorage.Count;
 
+    /// <summary>When we last finished asking everyone, so a save right afterwards need not ask again.</summary>
+    public float LastStorageGather { get; private set; }
+
     /// <summary>
     /// Asks everyone what they are carrying, and says how many were asked. Their answers arrive in
     /// their own time; <see cref="WaitForPlayerStorage"/> is for when we cannot go on without them.
@@ -2207,6 +2210,8 @@ public class NetworkServer : NetworkManager
         {
             yield return null;
         }
+
+        LastStorageGather = Time.realtimeSinceStartup;
 
         if (awaitingStorage.Count > 0)
             LogWarning($"Gave up waiting for {awaitingStorage.Count} of {asked} player(s) after {timeout:0.#}s; saving what was last heard from them");
