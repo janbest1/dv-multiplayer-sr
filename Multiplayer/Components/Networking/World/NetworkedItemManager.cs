@@ -306,7 +306,14 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                     ItemUpdateData snapshot = nearbyItem.CreateUpdateData(ItemUpdateData.ItemUpdateType.Create);
 
                     if (snapshot != null)
+                    {
                         playerUpdates.Add(snapshot);
+
+                        //Introducing it here does not stop it introducing itself: an item nobody has
+                        //been told about is dirty until it speaks for itself, so a moment later the
+                        //same item arrives a second time, as a second Create for the same thing.
+                        nearbyItem.MarkAsKnownElsewhere();
+                    }
                 }
                 else
                 {
@@ -331,6 +338,29 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                         player.KnownItems[nearbyItem] = tick;
                     }
                 }
+            }
+
+            //Being near is how a player first hears about an item; it is not how they stop caring
+            //about one. Something taken into a lost and found, carried off, or shunted to the far
+            //end of a yard is no longer nearby - and the player who was told about it still has it
+            //standing exactly where it was. The host banked a paint can and told only itself: for
+            //the other player it went on lying on the counter, the same can in two places at once.
+            //Where it is can wait until they are close again. What it now is cannot.
+            foreach (var dirtyUpdate in dirtyItems)
+            {
+                if (!dirtyUpdate.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.ItemState))
+                    continue;
+
+                if (!NetworkedItem.TryGet(dirtyUpdate.ItemNetId, out NetworkedItem changedItem) || changedItem == null)
+                    continue;
+
+                if (!player.KnownItems.ContainsKey(changedItem) || player.NearbyItems.ContainsKey(changedItem))
+                    continue;
+
+                Multiplayer.LogDebug(() => $"ProcessChanged({tick}) Sending item {dirtyUpdate.ItemNetId} to {player.Username} out of range, Update Type: {dirtyUpdate.UpdateType}, Item State: {dirtyUpdate.ItemState}");
+
+                playerUpdates.Add(dirtyUpdate);
+                player.KnownItems[changedItem] = tick;
             }
 
             if (DestroyedItems.Count > 0)
