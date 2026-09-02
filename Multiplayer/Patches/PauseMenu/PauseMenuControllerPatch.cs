@@ -3,6 +3,7 @@ using DV.UIFramework;
 using HarmonyLib;
 using Multiplayer.Components.Networking;
 using System;
+using System.Collections;
 using System.Reflection;
 
 namespace Multiplayer.Patches.PauseMenu;
@@ -35,12 +36,42 @@ public static class PauseMenuController_Patch
         __instance.tutorialsButton.gameObject.SetActive(false);
     }
 
+    //Set while we are holding a click back to gather from the clients, so the second one goes
+    //through rather than starting all over again
+    private static bool gathering;
+
+    /// <summary>
+    /// Holds a host's click just long enough to ask everyone what they are carrying and hear back.
+    /// Nothing is replaced: the click is handed back to the game the moment the answers are in, so
+    /// the usual "are you sure" and everything after it happen exactly as they always did.
+    /// </summary>
+    private static bool GatherFromClients(Action carryOn)
+    {
+        if (gathering || !NetworkLifecycle.Instance.IsHost() || NetworkLifecycle.Instance.Server == null)
+            return false;
+
+        gathering = true;
+
+        NetworkLifecycle.Instance.StartCoroutine(Gather(carryOn));
+
+        return true;
+    }
+
+    private static IEnumerator Gather(Action carryOn)
+    {
+        yield return NetworkLifecycle.Instance.Server.WaitForPlayerStorage();
+
+        carryOn();
+
+        gathering = false;
+    }
+
     [HarmonyPatch(nameof(PauseMenuController.OnExitLevelClicked))]
     [HarmonyPrefix]
     private static bool OnExitLevelClicked(PauseMenuController __instance)
     {
-        if(NetworkLifecycle.Instance.IsHost())
-            return true;
+        if (NetworkLifecycle.Instance.IsHost())
+            return !GatherFromClients(() => __instance.OnExitLevelClicked());
 
 
         if (!__instance.popupManager.CanShowPopup())
@@ -81,8 +112,8 @@ public static class PauseMenuController_Patch
     [HarmonyPrefix]
     private static bool OnQuitClicked(PauseMenuController __instance)
     {
-        if(NetworkLifecycle.Instance.IsHost())
-            return true;
+        if (NetworkLifecycle.Instance.IsHost())
+            return !GatherFromClients(() => __instance.OnQuitClicked());
 
 
         if (!__instance.popupManager.CanShowPopup())

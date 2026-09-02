@@ -88,10 +88,6 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
 
         root.SetJObject(PLAYERS_KEY, players);
         data.SetJObject(ROOT_KEY, root);
-
-        //And ask everyone again, so that next time round is about now rather than about whenever
-        //they last happened to say something. Their answers land in their own time.
-        NetworkLifecycle.Instance.Server?.RequestPlayerStorage();
     }
 
     /// <summary>

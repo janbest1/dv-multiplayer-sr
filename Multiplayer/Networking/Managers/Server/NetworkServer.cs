@@ -43,6 +43,7 @@ using Multiplayer.Patches.MainMenu;
 using Multiplayer.Patches.World;
 using Multiplayer.Utils;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -342,6 +343,8 @@ public class NetworkServer : NetworkManager
 
         if (WorldStreamingInit.isLoaded)
             SaveGameManager.Instance.UpdateInternalData();
+
+        awaitingStorage.Remove(player.PlayerId);
 
         serverPlayers.Remove(player.PlayerId);
         peers.Remove(player.PlayerId);
@@ -2137,21 +2140,82 @@ public class NetworkServer : NetworkManager
         player.ReportedInventory = packet.Inventory;
         player.ReportedLostAndFound = packet.LostAndFound;
 
-        LogDebug(() => $"OnServerboundPlayerStoragePacket() {player.Username} carrying: {packet.Inventory?.Length}, in keeping: {packet.LostAndFound?.Length}");
+        awaitingStorage.Remove(player.PlayerId);
+
+        LogDebug(() => $"OnServerboundPlayerStoragePacket() {player.Username} carrying: {packet.Inventory?.Length}, in keeping: {packet.LostAndFound?.Length}, still waiting on {awaitingStorage.Count}");
 
         //Straight into the save data as well: somebody leaving reports on their way out, and by the
         //time it lands here the host may already have written everything else about them.
         NetworkedSaveGameManager.Instance?.Server_RememberPlayerItems(player);
     }
 
+    //Players who have been asked what they are carrying and have not answered yet
+    private readonly HashSet<byte> awaitingStorage = [];
+
+    public int PendingStorageReports => awaitingStorage.Count;
+
     /// <summary>
-    /// Asks everyone what they are carrying. Their answer arrives in its own time and is written
-    /// down with the next save, which is soon enough for something meant to catch a session that
-    /// ends without a goodbye.
+    /// Asks everyone what they are carrying, and says how many were asked. Their answers arrive in
+    /// their own time; <see cref="WaitForPlayerStorage"/> is for when we cannot go on without them.
     /// </summary>
-    public void RequestPlayerStorage()
+    public int RequestPlayerStorage()
     {
+        awaitingStorage.Clear();
+
+        foreach (ServerPlayer player in ServerPlayers)
+        {
+            if (player == null || player.Peer == SelfPeer || player.LoadingState != PlayerLoadingState.Complete)
+                continue;
+
+            awaitingStorage.Add(player.PlayerId);
+        }
+
+        if (awaitingStorage.Count == 0)
+            return 0;
+
         SendPacketToAll(new ClientboundRequestPlayerStoragePacket(), DeliveryMethod.ReliableOrdered, PlayerLoadingState.Complete, SelfPeer);
+
+        return awaitingStorage.Count;
+    }
+
+    /// <summary>
+    /// Asks everyone what they are carrying and waits for them to say, so that whatever happens next
+    /// - saving, closing the game - has the truth rather than whatever was last mentioned. Gives up
+    /// after a few seconds: a client that has already gone quiet must not keep the host here.
+    /// </summary>
+    public IEnumerator WaitForPlayerStorage(float timeout = 5f)
+    {
+        int asked = RequestPlayerStorage();
+
+        yield return WaitForStorageReports(asked, timeout);
+    }
+
+    /// <summary>
+    /// Waits for answers already asked for. Gives up after a few seconds: a client that has gone
+    /// quiet must not keep the host sitting here.
+    /// </summary>
+    public IEnumerator WaitForStorageReports(int asked, float timeout = 5f)
+    {
+        if (asked == 0)
+            yield break;
+
+        Log($"Waiting for {asked} player(s) to say what they are carrying");
+
+        float deadline = Time.realtimeSinceStartup + timeout;
+
+        while (awaitingStorage.Count > 0 && Time.realtimeSinceStartup < deadline)
+        {
+            yield return null;
+        }
+
+        if (awaitingStorage.Count > 0)
+            LogWarning($"Gave up waiting for {awaitingStorage.Count} of {asked} player(s) after {timeout:0.#}s; saving what was last heard from them");
+        else
+            Log($"All {asked} player(s) answered");
+
+        //Straight into the save data, so it is there whatever happens next
+        foreach (ServerPlayer player in ServerPlayers)
+            NetworkedSaveGameManager.Instance?.Server_RememberPlayerItems(player);
     }
 
     private void OnCommonItemChangePacket(CommonItemChangePacket packet, ITransportPeer peer)
