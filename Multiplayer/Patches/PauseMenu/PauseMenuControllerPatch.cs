@@ -68,10 +68,12 @@ public static class PauseMenuController_Patch
 
     [HarmonyPatch(nameof(PauseMenuController.OnExitLevelClicked))]
     [HarmonyPrefix]
-    private static bool OnExitLevelClicked(PauseMenuController __instance)
+    private static bool OnExitLevelClicked(PauseMenuController __instance, IClickable _)
     {
+        IClickable clicked = _;
+
         if (NetworkLifecycle.Instance.IsHost())
-            return !GatherFromClients(() => __instance.OnExitLevelClicked());
+            return !GatherFromClients(() => __instance.OnExitLevelClicked(clicked));
 
 
         if (!__instance.popupManager.CanShowPopup())
@@ -110,10 +112,12 @@ public static class PauseMenuController_Patch
 
     [HarmonyPatch("OnQuitClicked")]
     [HarmonyPrefix]
-    private static bool OnQuitClicked(PauseMenuController __instance)
+    private static bool OnQuitClicked(PauseMenuController __instance, IClickable _)
     {
+        IClickable clicked = _;
+
         if (NetworkLifecycle.Instance.IsHost())
-            return !GatherFromClients(() => __instance.OnQuitClicked());
+            return !GatherFromClients(() => __instance.OnQuitClicked(clicked));
 
 
         if (!__instance.popupManager.CanShowPopup())
