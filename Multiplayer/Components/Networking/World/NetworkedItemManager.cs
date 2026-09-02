@@ -21,9 +21,28 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
      * Server 
      */
 
-    //Culling distance for items
-    public const float MAX_DISTANCE_TO_ITEM = 100f;
-    public const float MAX_DISTANCE_TO_ITEM_SQR = MAX_DISTANCE_TO_ITEM * MAX_DISTANCE_TO_ITEM;
+    //Culling distance for items, fallen back on when the setting is missing or nonsense
+    public const float MAX_DISTANCE_TO_ITEM = 250f;
+    private const float MIN_DISTANCE_TO_ITEM = 50f;
+
+    /// <summary>
+    /// How far from a player an item is told about, squared. A flag planted half a kilometre down
+    /// the line is nobody else's business until they come near it - but a hundred metres, which is
+    /// what this was, is shorter than the stretch of track anyone would mark out with them, so most
+    /// of a row of flags was never mentioned to the other player at all.
+    /// </summary>
+    private static float MaxDistanceToItemSqr
+    {
+        get
+        {
+            float range = Multiplayer.Settings?.ItemRange ?? MAX_DISTANCE_TO_ITEM;
+
+            if (range < MIN_DISTANCE_TO_ITEM)
+                range = MAX_DISTANCE_TO_ITEM;
+
+            return range * range;
+        }
+    }
     public const float NEARBY_REMOVAL_DELAY = 3f; // 3 seconds delay
     public const float REACH_DISTANCE_BUFFER = 0.5f;
     public float MAX_REACH_DISTANCE = 4f + REACH_DISTANCE_BUFFER;         //from the game, but we should try to look up the value
@@ -186,6 +205,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     private void UpdatePlayerItemLists()
     {
         float currentTime = Time.time;
+        float maxDistanceSqr = MaxDistanceToItemSqr;
 
         var allItems = NetworkedItem.GetAll();
 
@@ -204,7 +224,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
                 float sqrDistance = (player.WorldPosition - item.transform.position).sqrMagnitude;
 
-                if (sqrDistance <= MAX_DISTANCE_TO_ITEM_SQR)
+                if (sqrDistance <= maxDistanceSqr)
                 {
                     //NetworkLifecycle.Instance.Server.LogDebug(() => $"UpdatePlayerItemLists() Adding for player: {player?.Username}, Nearby Item: {item?.NetId}, {item?.name}");
                     player.NearbyItems[item] = currentTime;

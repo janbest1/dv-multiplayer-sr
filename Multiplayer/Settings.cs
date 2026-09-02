@@ -52,6 +52,8 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     public int Port = 7777;
     [Draw("Details", Tooltip = "Details shown in the server browser.")]
     public string Details = "";
+    [Draw("Item Range (m)", Tooltip = "How far from a player an item is told about. Something left further away than this stays unseen until that player comes closer.")]
+    public int ItemRange = 250;
 
     [Space(10)]
     [Header("Lobby Server")]
