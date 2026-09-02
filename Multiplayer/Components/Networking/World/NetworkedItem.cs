@@ -370,6 +370,20 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (Item == null && Register() == false)
             return null;
 
+        //A shop hands over a basket of purchases in stages. Every piece of it is built at the
+        //world origin first, in a row a metre apart and hanging off nothing at all:
+        //
+        //    Vector3 position = zero + right * (float)num;
+        //    Instantiate(Resources.Load(itemPrefabName) as GameObject, position, identity);
+        //
+        //and only a moment later is each one switched off, put in the shop's keeping, and set
+        //down on the counter. Everything the game has really placed hangs off something, so an
+        //item with no parent has not been placed yet. Caught in that window, a whole basket was
+        //laid out for everyone else in a field by the origin - two hundred metres from the shop
+        //and a hundred below it, far enough that their game called every piece of it lost.
+        if (transform.parent == null)
+            return null;
+
         if (heldByRemote != 0)
             ReviewRemoteHolder();
 
