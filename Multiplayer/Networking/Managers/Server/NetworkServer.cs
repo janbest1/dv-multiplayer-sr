@@ -27,6 +27,7 @@ using Multiplayer.Networking.Data.RPCs;
 using Multiplayer.Networking.Data.Train;
 using Multiplayer.Networking.Data.World;
 using Multiplayer.Networking.Packets.Clientbound;
+using Multiplayer.Components.SaveGame;
 using Multiplayer.Networking.Packets.Clientbound.Jobs;
 using Multiplayer.Networking.Packets.Clientbound.SaveGame;
 using Multiplayer.Networking.Packets.Clientbound.Train;
@@ -193,6 +194,7 @@ public class NetworkServer : NetworkManager
 
         netPacketProcessor.SubscribeReusable<CommonGenericSwitchStatePacket, ITransportPeer>(OnCommonGenericSwitchStatePacket);
         netPacketProcessor.SubscribeReusable<ServerboundItemRegisterPacket, ITransportPeer>(OnServerboundItemRegisterPacket);
+        netPacketProcessor.SubscribeReusable<ServerboundPlayerStoragePacket, ITransportPeer>(OnServerboundPlayerStoragePacket);
 
 
         // Player
@@ -2121,6 +2123,35 @@ public class NetworkServer : NetworkManager
             ItemNetId = netId,
             Guid = guid.ToByteArray()
         }, DeliveryMethod.ReliableOrdered);
+    }
+
+    /// <summary>
+    /// A client telling us what it has on it. Only they know the whole of it - which belt slot each
+    /// thing is in, what is inside what - so we take their word and write it down for them.
+    /// </summary>
+    private void OnServerboundPlayerStoragePacket(ServerboundPlayerStoragePacket packet, ITransportPeer peer)
+    {
+        if (!TryGetServerPlayer(peer, out ServerPlayer player))
+            return;
+
+        player.ReportedInventory = packet.Inventory;
+        player.ReportedLostAndFound = packet.LostAndFound;
+
+        LogDebug(() => $"OnServerboundPlayerStoragePacket() {player.Username} carrying: {packet.Inventory?.Length}, in keeping: {packet.LostAndFound?.Length}");
+
+        //Straight into the save data as well: somebody leaving reports on their way out, and by the
+        //time it lands here the host may already have written everything else about them.
+        NetworkedSaveGameManager.Instance?.Server_RememberPlayerItems(player);
+    }
+
+    /// <summary>
+    /// Asks everyone what they are carrying. Their answer arrives in its own time and is written
+    /// down with the next save, which is soon enough for something meant to catch a session that
+    /// ends without a goodbye.
+    /// </summary>
+    public void RequestPlayerStorage()
+    {
+        SendPacketToAll(new ClientboundRequestPlayerStoragePacket(), DeliveryMethod.ReliableOrdered, PlayerLoadingState.Complete, SelfPeer);
     }
 
     private void OnCommonItemChangePacket(CommonItemChangePacket packet, ITransportPeer peer)

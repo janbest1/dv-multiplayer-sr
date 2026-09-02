@@ -4,6 +4,7 @@ using Multiplayer.Components.Networking.Train;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Components.SaveGame;
 using Multiplayer.Networking.Data.Player;
+using Multiplayer.Networking.Data.Items;
 using Multiplayer.Networking.TransportLayers;
 using Multiplayer.Utils;
 using Newtonsoft.Json.Linq;
@@ -97,7 +98,12 @@ public class ServerPlayer : IDisposable
     public Dictionary<NetworkedItem, uint> KnownItems { get; private set; } = new Dictionary<NetworkedItem, uint>(); //NetworkedItem, last updated tick
     public Dictionary<NetworkedItem, float> NearbyItems { get; private set; } = new Dictionary<NetworkedItem, float>(); //NetworkedItem, time since near the item
     public HashSet<ushort> OwnedItems { get; private set; } = new HashSet<ushort>();
-    public StorageBase Storage { get; set; } = new StorageBase();
+    /// <summary>
+    /// What this player last said they were carrying and keeping. Their own game never writes
+    /// anything down, so this - and what the host makes of it - is the only record there is.
+    /// </summary>
+    public PlayerItemSaveData[] ReportedInventory { get; set; }
+    public PlayerItemSaveData[] ReportedLostAndFound { get; set; }
 
     private Vector3 _lastWorldPos = Vector3.zero;
     private Vector3 _lastAbsoluteWorldPosition = Vector3.zero;

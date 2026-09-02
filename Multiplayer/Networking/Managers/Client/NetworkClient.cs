@@ -252,6 +252,7 @@ public class NetworkClient : NetworkManager
         netPacketProcessor.SubscribeReusable<CommonCashRegisterWithModulesActionPacket>(OnCommonCashRegisterWithModulesActionPacket);
         netPacketProcessor.SubscribeReusable<CommonGenericSwitchStatePacket>(OnCommonGenericSwitchStatePacket);
         netPacketProcessor.SubscribeReusable<ClientboundItemRegisteredPacket>(OnClientboundItemRegisteredPacket);
+        netPacketProcessor.SubscribeReusable<ClientboundRequestPlayerStoragePacket>(OnClientboundRequestPlayerStoragePacket);
 
         netPacketProcessor.SubscribeReusable<CommonChatPacket>(OnCommonChatPacket);
     }
@@ -1911,6 +1912,32 @@ public class NetworkClient : NetworkManager
         {
             RequestId = requestId,
             PrefabName = prefabName
+        }, DeliveryMethod.ReliableOrdered);
+    }
+
+    private void OnClientboundRequestPlayerStoragePacket(ClientboundRequestPlayerStoragePacket packet)
+    {
+        SendPlayerStorage();
+    }
+
+    /// <summary>
+    /// Tells the host what we are carrying and what is in our lost and found. Our own game is never
+    /// written to disk, so this is the only way any of it outlives the session.
+    /// </summary>
+    public void SendPlayerStorage()
+    {
+        if (NetworkLifecycle.Instance.IsHost())
+            return;
+
+        if (!PlayerStorage.TryCollectOwn(out PlayerItemSaveData[] inventory, out PlayerItemSaveData[] lostAndFound))
+            return;
+
+        Log($"Sending PlayerStorage, carrying: {inventory.Length}, in keeping: {lostAndFound.Length}");
+
+        SendPacketToServer(new ServerboundPlayerStoragePacket
+        {
+            Inventory = inventory,
+            LostAndFound = lostAndFound
         }, DeliveryMethod.ReliableOrdered);
     }
 

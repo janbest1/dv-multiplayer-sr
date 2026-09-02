@@ -1,3 +1,4 @@
+using DV.Utils;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Items;
@@ -12,6 +13,46 @@ namespace Multiplayer.Components.SaveGame;
 /// </summary>
 public static class PlayerStorage
 {
+    /// <summary>
+    /// Reads our own belongings by asking the game to write them out and reading them straight back.
+    /// Going through the game's own serialiser means belt slots, containers, locked places and every
+    /// item's own state come along without us having to know anything about any of it.
+    /// </summary>
+    public static bool TryCollectOwn(out PlayerItemSaveData[] inventory, out PlayerItemSaveData[] lostAndFound)
+    {
+        inventory = null;
+        lostAndFound = null;
+
+        StorageController storage = StorageController.Instance;
+        SaveGameManager manager = SaveGameManager.Instance;
+
+        if (storage == null || manager == null || manager.data == null)
+            return false;
+
+        if (storage.StorageInventory == null || storage.StorageLostAndFound == null)
+            return false;
+
+        try
+        {
+            storage.StorageInventory.SaveStorage(manager.data);
+            storage.StorageLostAndFound.SaveStorage(manager.data);
+
+            PlayerItemSaveData[] carried = ToPacket(StorageSerializer.LoadStorageData(StorageType.Inventory, manager.data));
+            PlayerItemSaveData[] kept = ToPacket(StorageSerializer.LoadStorageData(StorageType.LostAndFound, manager.data));
+
+            inventory = carried;
+            lostAndFound = kept;
+
+            Multiplayer.LogDebug(() => $"PlayerStorage.TryCollectOwn() carrying: {carried.Length}, in keeping: {kept.Length}");
+            return true;
+        }
+        catch (System.Exception ex)
+        {
+            Multiplayer.LogWarning($"PlayerStorage.TryCollectOwn() {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>
     /// Writes down what one player is carrying and what is waiting in their keeping.
     ///
@@ -49,7 +90,10 @@ public static class PlayerStorage
                 lostAndFound.Add(Describe(prefabName));
         }
 
-        Multiplayer.LogDebug(() => $"PlayerStorage.CollectForPlayer({player.Username}) carrying: {inventory.Count}, in keeping: {lostAndFound.Count}");
+        int carriedCount = inventory.Count;
+        int keptCount = lostAndFound.Count;
+
+        Multiplayer.LogDebug(() => $"PlayerStorage.CollectForPlayer({player.Username}) carrying: {carriedCount}, in keeping: {keptCount}");
     }
 
     /// <summary>

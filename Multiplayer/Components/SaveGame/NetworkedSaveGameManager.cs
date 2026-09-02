@@ -80,18 +80,61 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
 
             //A client's game is never written to disk - it would put this world into their own
             //career - so what they are carrying and what is waiting in their keeping is kept here,
-            //against their name, and handed back when they next arrive. This runs when the game
-            //saves and when somebody leaves, which is the moment that matters.
-            PlayerStorage.CollectForPlayer(player, out List<StorageItemData> inventory, out List<StorageItemData> lostAndFound);
-
-            playerData[INVENTORY_KEY] = JArray.FromObject(inventory);
-            playerData[LOST_AND_FOUND_KEY] = JArray.FromObject(lostAndFound);
+            //against their name, and handed back when they next arrive.
+            WriteItems(playerData, player);
 
             players.SetJObject(player.Guid.ToString(), playerData);
         }
 
         root.SetJObject(PLAYERS_KEY, players);
         data.SetJObject(ROOT_KEY, root);
+
+        //And ask everyone again, so that next time round is about now rather than about whenever
+        //they last happened to say something. Their answers land in their own time.
+        NetworkLifecycle.Instance.Server?.RequestPlayerStorage();
+    }
+
+    /// <summary>
+    /// Puts one player's belongings into the save data straight away, without waiting for the next
+    /// pass over everybody. Somebody leaving says what they have on their way out, and by the time
+    /// it arrives the host may already have written down everything else about them.
+    /// </summary>
+    public void Server_RememberPlayerItems(ServerPlayer player)
+    {
+        SaveGameData data = SaveGameManager.Instance?.data;
+
+        if (data == null || player == null)
+            return;
+
+        JObject root = data.GetJObject(ROOT_KEY) ?? [];
+        JObject players = root.GetJObject(PLAYERS_KEY) ?? [];
+        JObject playerData = players.GetJObject(player.Guid.ToString()) ?? [];
+
+        WriteItems(playerData, player);
+
+        players.SetJObject(player.Guid.ToString(), playerData);
+        root.SetJObject(PLAYERS_KEY, players);
+        data.SetJObject(ROOT_KEY, root);
+    }
+
+    /// <summary>
+    /// What the player themselves said, if they have said anything - only they know which belt slot
+    /// a thing sits in or what is inside what. Failing that, what the host can see for itself: it
+    /// has a copy of all their things and knows which are in a hand, a bag or a box.
+    /// </summary>
+    private static void WriteItems(JObject playerData, ServerPlayer player)
+    {
+        if (player.ReportedInventory != null || player.ReportedLostAndFound != null)
+        {
+            playerData[INVENTORY_KEY] = JArray.FromObject(PlayerStorage.ToStorage(player.ReportedInventory));
+            playerData[LOST_AND_FOUND_KEY] = JArray.FromObject(PlayerStorage.ToStorage(player.ReportedLostAndFound));
+            return;
+        }
+
+        PlayerStorage.CollectForPlayer(player, out List<StorageItemData> inventory, out List<StorageItemData> lostAndFound);
+
+        playerData[INVENTORY_KEY] = JArray.FromObject(inventory);
+        playerData[LOST_AND_FOUND_KEY] = JArray.FromObject(lostAndFound);
     }
 
     public JObject Server_GetPlayerData(SaveGameData data, Guid guid)

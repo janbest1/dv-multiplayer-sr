@@ -61,6 +61,10 @@ public static class PauseMenuController_Patch
                 if (result.closedBy == PopupClosedByAction.Negative)
                     return;
 
+                //On the way out, say what we have on us. Our own game is never written to disk, so
+                //if we leave without a word the host has only what it could work out for itself.
+                NetworkLifecycle.Instance.Client?.SendPlayerStorage();
+
                 FieldInfo eventField = __instance.GetType().GetField("ExitLevelRequested", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (eventField != null)
                 {
@@ -94,6 +98,10 @@ public static class PauseMenuController_Patch
                 //Negative = 'No', so we're aborting the disconnect
                 if (result.closedBy == PopupClosedByAction.Negative)
                     return;
+
+                //On the way out, say what we have on us. Our own game is never written to disk, so
+                //if we leave without a word the host has only what it could work out for itself.
+                NetworkLifecycle.Instance.Client?.SendPlayerStorage();
 
                 FieldInfo eventField = __instance.GetType().GetField("QuitGameRequested", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 if (eventField != null)
