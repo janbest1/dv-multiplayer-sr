@@ -442,6 +442,18 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             stowedSince = 0f;
         }
 
+        //Something switched off and parked under the world root is not lying in the world.
+        //Storage keeps what it holds that way, and a basket of shop purchases with it: buy an
+        //armful and they are set down in a row a metre apart near the world origin, hundreds of
+        //metres from the shop and a hundred below it. Read off the transform that is a pile of
+        //items lying in a field, which is exactly where everyone else was told to put them.
+        //Nothing is said about it until it is really out in the world.
+        if (currentState == ItemState.Dropped && !gameObject.activeSelf)
+        {
+            Multiplayer.LogDebug(() => $"NetworkedItem.GetSnapshot() NetId: {NetId}, name: {name}. Switched off and parked, saying nothing yet");
+            return null;
+        }
+
         //Only worth passing on once it has come to rest, and only while it is still something we
         //send a world position for at all
         if (moved && currentState == ItemState.Dropped && HasSettled())
