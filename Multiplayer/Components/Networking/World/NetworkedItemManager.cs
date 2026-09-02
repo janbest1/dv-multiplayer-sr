@@ -906,10 +906,15 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         //What the player is holding or carrying stays theirs. Everything else standing in the world
         //is the client's own copy of scenery the host is about to send its version of - shop
         //equipment included. Leaving those out left a second scanner on every shop counter.
+        //
+        //What is in their lost and found is theirs as well, and the host has no copy of it to send:
+        //sweeping that away emptied the shed of everything they had ever left behind, every single
+        //time they joined.
         return netItem != null
             && netItem.Item != null
             && !netItem.Item.IsGrabbed()
-            && !StorageController.Instance.StorageInventory.ContainsItem(netItem.Item);
+            && !StorageController.Instance.StorageInventory.ContainsItem(netItem.Item)
+            && !StorageController.Instance.StorageLostAndFound.ContainsItem(netItem.Item);
     }
 
     public void CacheWorldItems()

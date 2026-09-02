@@ -438,9 +438,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //laid out for everyone else in a field by the origin - two hundred metres from the shop
         //and a hundred below it, far enough that their game called every piece of it lost.
         //
-        //An item the player puts away is detached from the world in exactly the same way, and that
-        //is something everyone else does need to hear about - so the inventory is asked first.
-        if (transform.parent == null && !IsPutAway())
+        //An item the player puts away is detached from the world in exactly the same way, and so is
+        //one that has been taken into a keeping - a purchase spends its first moments in both at
+        //once - and those everyone else does need to hear about. So they are asked first.
+        if (transform.parent == null && !IsPutAway() && !IsInLostAndFound())
             return null;
 
         if (heldByRemote != 0)
@@ -521,9 +522,12 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //metres from the shop and a hundred below it. Read off the transform that is a pile of
         //items lying in a field, which is exactly where everyone else was told to put them.
         //Nothing is said about it until it is really out in the world.
-        //A shop's stock sits in its keeping the same way, and none of that has ever been mentioned
-        //to anyone. Something nobody knows about does not need to be taken away from them.
-        if ((currentState == ItemState.Dropped || (currentState == ItemState.InStorage && createdDirty)) && !gameObject.activeSelf)
+        //A shop's stock sits in a keeping the same way, and none of that has ever been mentioned to
+        //anyone. Something nobody knows about does not need to be taken away from them - but that
+        //only holds for the host, which owns the world and everything standing about unclaimed in
+        //it. What a client is keeping is the player's own: purchases, and whatever was in their
+        //shed when they arrived. Nobody else has a copy of any of it, so it is introduced.
+        if ((currentState == ItemState.Dropped || (currentState == ItemState.InStorage && createdDirty && NetworkLifecycle.Instance.IsHost())) && !gameObject.activeSelf)
         {
             parked = true;
             Multiplayer.LogDebug(() => $"NetworkedItem.GetSnapshot() NetId: {NetId}, name: {name}. Switched off and parked, saying nothing yet");
@@ -828,7 +832,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //An item taken in says whose keeping it is in, so that player's game can put it in their
         //own lost and found and hand it back to them there.
         if (itemState == ItemState.InStorage)
+        {
             holder = storedFor != 0 ? storedFor : LastReportedBy;
+
+            //Nobody has told us whose it is because nobody had to: we are the ones keeping it
+            if (holder == 0 && !NetworkLifecycle.Instance.IsHost())
+                holder = NetworkLifecycle.Instance.Client?.PlayerId ?? 0;
+        }
 
         var updateData = new ItemUpdateData
         {
@@ -1380,6 +1390,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         heldByRemote = 0;
         mirroredState = null;
         storedFor = snapshot.Player;
+
+        //Keeping something is a claim on it, the same as holding it. A client's purchase arrives
+        //this way and never passes through anybody's hand on the way in.
+        if (NetworkLifecycle.Instance.IsHost() && snapshot.Player != 0)
+            NetworkedItemManager.Instance?.SetOwningPlayer(NetId, snapshot.Player);
 
         ReleaseFromRemoteHand();
         LeaveContainer();
