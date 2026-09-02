@@ -11,6 +11,7 @@ using System;
 using Multiplayer.Utils;
 using DV;
 using DV.Interaction;
+using DV.InventorySystem;
 using Multiplayer.Networking.Data.Items;
 
 namespace Multiplayer.Components.Networking.World;
@@ -937,9 +938,17 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         //What is in their lost and found is theirs as well, and the host has no copy of it to send:
         //sweeping that away emptied the shed of everything they had ever left behind, every single
         //time they joined.
+        //
+        //Asking the storages alone is not enough. Their things are handed back at the same moment
+        //the world is being swept, and a thing is the player's own from the instant it is made -
+        //but it reaches a storage list only once it has been put somewhere, which for the belt is
+        //later than for the shed. Nine things went into the cache between one and the other. So the
+        //question asked is simply whether it is theirs.
         return netItem != null
             && netItem.Item != null
             && !netItem.Item.IsGrabbed()
+            && !(netItem.Item.InventorySpecs != null && netItem.Item.InventorySpecs.BelongsToPlayer)
+            && !(Inventory.Instance != null && Inventory.Instance.Contains(netItem.gameObject, false))
             && !StorageController.Instance.StorageInventory.ContainsItem(netItem.Item)
             && !StorageController.Instance.StorageLostAndFound.ContainsItem(netItem.Item);
     }
