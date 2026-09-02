@@ -381,7 +381,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //item with no parent has not been placed yet. Caught in that window, a whole basket was
         //laid out for everyone else in a field by the origin - two hundred metres from the shop
         //and a hundred below it, far enough that their game called every piece of it lost.
-        if (transform.parent == null)
+        //
+        //An item the player puts away is detached from the world in exactly the same way, and that
+        //is something everyone else does need to hear about - so the inventory is asked first.
+        if (transform.parent == null && !IsPutAway())
             return null;
 
         if (heldByRemote != 0)
@@ -781,6 +784,16 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return ItemState.InContainer;
         }
 
+        //Being put away takes an item out of the world, and the game is free to do that however it
+        //likes: detach it from everything, or leave it standing where it was and switch it off.
+        //Both read as an item lying on the ground below, so this is settled first. An item in the
+        //hand counts as being in the belt as well, so that has to be ruled out here.
+        if (!Item.IsGrabbed() && IsPutAway())
+        {
+            Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, put away");
+            return ItemState.InInventory;
+        }
+
         RefreshParentCar();
 
         //Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, Parent: {Item.transform.parent} WorldMover: {WorldMover.OriginShiftParent}, wasThrown: {wasThrown}, isGrabbed: {Item.IsGrabbed()} Inventory.Contains(): {Inventory.Instance.Contains(this.gameObject, false)} Storage.Contains: {StorageController.Instance.StorageInventory.ContainsItem(Item)}");
@@ -820,6 +833,15 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, no car found for parent {transform.parent}, falling back to Dropped");
         return ItemState.Dropped;
 
+    }
+
+    /// <summary>
+    /// Whether our own player has this item stowed on their belt or in their hotbar.
+    /// </summary>
+    private bool IsPutAway()
+    {
+        Inventory inventory = Inventory.Instance;
+        return inventory != null && inventory.Contains(gameObject, false);
     }
 
     /// <summary>
@@ -1442,6 +1464,12 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             {
                 previous.remoteHolder = null;
                 previous.gameObject.SetActive(false);
+
+                //Whatever they were holding before is put away as far as we can tell. Saying so
+                //here matters: an item still believing it is in that hand takes it straight back,
+                //and the two of them trade it twenty times a second for as long as they both live.
+                if (previous.mirroredState == ItemState.InHand)
+                    previous.mirroredState = ItemState.InInventory;
             }
         }
 
