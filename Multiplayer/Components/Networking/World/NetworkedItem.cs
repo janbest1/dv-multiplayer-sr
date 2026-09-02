@@ -1571,6 +1571,32 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     }
 
     /// <summary>
+    /// Puts the item out of play because the player it belonged to has left with it.
+    ///
+    /// Destroying it is not an option, however tempting: the game answers a destroyed item by
+    /// purging it from the inventory, and that walks a list of watchers of which one is always the
+    /// item itself, half gone. It throws, the whole chain stops, and the inventory system is left
+    /// wedged - the host could not pick anything up or put anything down for the rest of the
+    /// session. Out of sight and out of everyone's storage does the same job and nothing else.
+    /// </summary>
+    public void SetAside()
+    {
+        ReleaseFromRemoteHand();
+
+        heldByRemote = 0;
+        mirroredState = null;
+        storedFor = 0;
+        parked = true;
+
+        StorageController storage = StorageController.Instance;
+
+        if (storage != null && Item != null)
+            storage.RemoveItemFromStorageItemList(Item);
+
+        gameObject.SetActive(false);
+    }
+
+    /// <summary>
     /// Hands the item back to the world when the player carrying it has left. Nobody is going to
     /// say where it went otherwise, so whatever they had in hand is left where they stood.
     /// </summary>

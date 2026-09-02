@@ -70,6 +70,10 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     //Items we were asked to build and could not, so the same complaint isn't made every tick
     private readonly HashSet<ushort> uncreatable = new HashSet<ushort>();
 
+    //How often the host asks the clients what they have on them, in ticks
+    private const uint STORAGE_REQUEST_INTERVAL = NetworkLifecycle.TICK_RATE * 60;
+    private uint lastStorageRequest;
+
     private bool ClientInitialised = false;
 
 
@@ -160,6 +164,14 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         {
             UpdatePlayerItemLists();
             ProcessChanged(tick);
+
+            //Saving writes down whatever the clients last said. Asking now and then keeps that from
+            //being an hour old when the host saves by hand or closes the game.
+            if (tick - lastStorageRequest >= STORAGE_REQUEST_INTERVAL)
+            {
+                lastStorageRequest = tick;
+                NetworkLifecycle.Instance.Server.RequestPlayerStorage();
+            }
         }
         else
         {
@@ -487,7 +499,14 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         foreach (NetworkedItem item in leaving)
         {
             NetworkLifecycle.Instance.Server.LogDebug(() => $"ForgetPlayer({playerId}) {item.name} ({item.NetId}) goes with them");
-            Destroy(item.gameObject);
+
+            //Everyone else can let go of their copy
+            ItemUpdateData farewell = item.CreateUpdateData(ItemUpdateData.ItemUpdateType.Destroy);
+
+            if (farewell != null)
+                AddDirtyItemSnapshot(item, farewell);
+
+            item.SetAside();
         }
     }
 

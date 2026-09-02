@@ -1,5 +1,8 @@
+using DV.CabControls;
+using DV.InventorySystem;
 using DV.ThingTypes;
 using DV.Utils;
+using Newtonsoft.Json.Linq;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Items;
@@ -38,7 +41,11 @@ public static class PlayerStorage
             storage.StorageInventory.SaveStorage(manager.data);
             storage.StorageLostAndFound.SaveStorage(manager.data);
 
-            PlayerItemSaveData[] carried = ToPacket(StorageSerializer.LoadStorageData(StorageType.Inventory, manager.data));
+            List<StorageItemData> carriedItems = StorageSerializer.LoadStorageData(StorageType.Inventory, manager.data) ?? new List<StorageItemData>();
+
+            AppendHeldItem(carriedItems);
+
+            PlayerItemSaveData[] carried = ToPacket(carriedItems);
             PlayerItemSaveData[] kept = ToPacket(StorageSerializer.LoadStorageData(StorageType.LostAndFound, manager.data));
 
             inventory = carried;
@@ -52,6 +59,57 @@ public static class PlayerStorage
             Multiplayer.LogWarning($"PlayerStorage.TryCollectOwn() {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Adds whatever is in the hand right now.
+    ///
+    /// Taking something out to hold it moves it out of the belt, and the belt is all the game writes
+    /// down - so the one thing a player is actually using was the one thing that never came back.
+    /// </summary>
+    private static void AppendHeldItem(List<StorageItemData> inventory)
+    {
+        Inventory bag = Inventory.Instance;
+
+        if (bag == null)
+            return;
+
+        GameObject held = bag.GetEquippedItemAtSlot(0);
+
+        if (held == null)
+            return;
+
+        int slot = bag.IndexOf(held);
+
+        //Already written down as part of the belt
+        if (slot >= 0 && inventory.Exists(entry => entry != null && entry.inventorySlotIndex == slot))
+            return;
+
+        ItemBase item = held.GetComponent<ItemBase>();
+        string prefabName = item?.InventorySpecs?.ItemPrefabName;
+
+        if (string.IsNullOrEmpty(prefabName))
+            return;
+
+        JObject state = null;
+        ItemSaveData saveData = held.GetComponent<ItemSaveData>();
+
+        if (saveData != null)
+        {
+            try
+            {
+                state = saveData.SaveItemData();
+            }
+            catch (System.Exception ex)
+            {
+                Multiplayer.LogWarning($"PlayerStorage.AppendHeldItem() {prefabName}: {ex.Message}");
+            }
+        }
+
+        Multiplayer.LogDebug(() => $"PlayerStorage.AppendHeldItem() {prefabName} in hand, slot {slot}");
+
+        //Held, so it comes back in the hand
+        inventory.Add(new StorageItemData(prefabName, Vector3.zero, Quaternion.identity, true, true, null, state, slot));
     }
 
     /// <summary>
