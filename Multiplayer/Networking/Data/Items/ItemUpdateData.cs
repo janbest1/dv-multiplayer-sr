@@ -46,6 +46,13 @@ public class ItemUpdateData
     /// </summary>
     public Guid Guid { get; set; }
 
+    /// <summary>
+    /// Whether the item is a player's own. The game decides this where the item comes from - a shop
+    /// marks everything it sells - and everything about being kept safe hangs off it, so the other
+    /// side has to be told rather than left to guess.
+    /// </summary>
+    public bool BelongsToPlayer { get; set; }
+
     public void Serialize(NetDataWriter writer)
     {
         writer.Put((byte)UpdateType);
@@ -61,6 +68,9 @@ public class ItemUpdateData
             writer.Put(PrefabName);
             writer.PutBytesWithLength(Guid.ToByteArray());
         }
+
+        if (UpdateType.HasFlag(ItemUpdateType.Create) || UpdateType.HasFlag(ItemUpdateType.ObjectState))
+            writer.Put(BelongsToPlayer);
 
         if (UpdateType.HasFlag(ItemUpdateType.Create) || UpdateType.HasFlag(ItemUpdateType.ItemState))
         {
@@ -133,6 +143,9 @@ public class ItemUpdateData
             byte[] guidBytes = reader.GetBytesWithLength();
             Guid = guidBytes != null && guidBytes.Length == 16 ? new Guid(guidBytes) : Guid.Empty;
         }
+
+        if (UpdateType.HasFlag(ItemUpdateType.Create) || UpdateType.HasFlag(ItemUpdateType.ObjectState))
+            BelongsToPlayer = reader.GetBool();
 
         if (UpdateType.HasFlag(ItemUpdateType.Create) || UpdateType.HasFlag(ItemUpdateType.ItemState))
         {

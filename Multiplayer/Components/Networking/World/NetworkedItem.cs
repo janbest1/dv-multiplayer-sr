@@ -647,6 +647,15 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     {
         CancelDeferredOnCar();
 
+        //Whose it is travels with it. The game only ever marks an item where it came from - a shop
+        //marks what it sells, to the machine that bought it - so on every other machine the same
+        //thing is nobody's, and everything the game does to keep a player's belongings safe passes
+        //it by. That is why one player's beacon went home when they left and the other's lay in the
+        //yard: not two rules, one rule asked on a machine that had never been told.
+        if (snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.Create) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.ObjectState))
+            if (Item != null && Item.InventorySpecs != null)
+                Item.InventorySpecs.BelongsToPlayer = snapshot.BelongsToPlayer;
+
         if (snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.ItemState) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.FullSync) || snapshot.UpdateType.HasFlag(ItemUpdateData.ItemUpdateType.Create))
         {
             Multiplayer.Log($"NetworkedItem.ApplySnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}, ItemState: {snapshot?.ItemState}, Active state: {gameObject.activeInHierarchy}");
@@ -837,6 +846,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             ContainerSlot = containerIndex,
             States = states,
             Guid = Guid,
+            BelongsToPlayer = Item.InventorySpecs != null && Item.InventorySpecs.BelongsToPlayer,
         };
 
         return updateData;
@@ -1538,44 +1548,6 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         Multiplayer.LogDebug(() => $"NetworkedItem.ReviewRemoteHolder() NetId: {NetId}, name: {name}. Player {holder.Username} is here now");
         TryShowInRemoteHand(heldByRemote);
-    }
-
-    /// <summary>
-    /// Takes the item into a player's keeping because nobody is near it any more.
-    ///
-    /// This is only for what the host's own game will not take in by itself - a copy of somebody
-    /// else's belongings is nobody's as far as this machine is concerned, and would lie in the
-    /// yard until the end of time. What the host does count as its own it puts in its own lost and
-    /// found, which is the right box for it anyway.
-    /// </summary>
-    public void TakeIntoKeeping(byte playerId)
-    {
-        if (playerId == 0 || storedFor != 0 || createdDirty || !initialised || Item == null)
-            return;
-
-        //Only things lying in the world. Anything in a hand, a bag, a container or on a car is
-        //somewhere on purpose.
-        if (lastState != ItemState.Dropped)
-            return;
-
-        if (Item.InventorySpecs == null)
-            return;
-
-        //The host's own belongings are the game's business, not ours - it has a real box to put
-        //them in and we do not. Anything of ours it will not take stays out in the world, which is
-        //better than being hidden into nowhere.
-        if (playerId == (NetworkLifecycle.Instance.Client?.PlayerId ?? 0) || Item.InventorySpecs.BelongsToPlayer)
-            return;
-
-        //A lost and found only takes essentials; everything else the game leaves lying about too
-        if (!Item.InventorySpecs.IsEssential)
-            return;
-
-        Multiplayer.LogDebug(() => $"NetworkedItem.TakeIntoKeeping({playerId}) NetId: {NetId}, name: {name}. Nobody near, keeping it for them");
-
-        storedFor = playerId;
-        gameObject.SetActive(false);
-        stateDirty = true;
     }
 
     /// <summary>

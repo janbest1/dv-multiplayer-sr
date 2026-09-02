@@ -70,8 +70,6 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     //Items we were asked to build and could not, so the same complaint isn't made every tick
     private readonly HashSet<ushort> uncreatable = new HashSet<ushort>();
 
-    //Reused each tick: everything somebody is standing near
-    private readonly HashSet<NetworkedItem> attended = new HashSet<NetworkedItem>();
     private bool ClientInitialised = false;
 
 
@@ -161,7 +159,6 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         if (NetworkLifecycle.Instance.IsHost())
         {
             UpdatePlayerItemLists();
-            ReviewLeftBehindItems();
             ProcessChanged(tick);
         }
         else
@@ -246,36 +243,6 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                     player.NearbyItems.Remove(kvp.Key);
                 }
             }
-        }
-    }
-
-    /// <summary>
-    /// Puts what nobody is near any more into the keeping of whoever it belongs to.
-    ///
-    /// The game does this for the things it counts as the player's own, and on this machine that
-    /// only ever means the host's. Somebody else's lantern is just a lantern here, so the game
-    /// leaves it lying in the yard for good - which is why the first player to leave came back to
-    /// find their belongings exactly where they had put them, and only the host's had gone home.
-    /// </summary>
-    private void ReviewLeftBehindItems()
-    {
-        attended.Clear();
-
-        foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
-            foreach (NetworkedItem nearbyItem in player.NearbyItems.Keys)
-                attended.Add(nearbyItem);
-
-        foreach (NetworkedItem item in NetworkedItem.GetAll())
-        {
-            if (item == null || attended.Contains(item))
-                continue;
-
-            //Only what somebody has actually carried, and only the kind of thing a lost and found
-            //will take. Anything else stays where it was put, which is where it belongs.
-            if (!GetItemOwner(item.NetId, out ServerPlayer owner))
-                continue;
-
-            item.TakeIntoKeeping(owner.PlayerId);
         }
     }
 
