@@ -1,5 +1,6 @@
 using HarmonyLib;
 using Multiplayer.Components.Networking;
+using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Data;
 using System;
 using UnityEngine;
@@ -16,6 +17,12 @@ namespace Multiplayer.Patches.World.Items;
 /// finds it in the bag rather than where they left it.
 ///
 /// The host answers for everyone now, and asks about the nearest player rather than its own.
+///
+/// It also asks a second question. Anywhere on this map is two hundred metres from anywhere else,
+/// so a single use of the map's teleport had everything anyone had put down taken in four seconds
+/// later, on both sides. Something set down on purpose stays where it was set down; the game only
+/// takes an item in when it has also ended up well below where it was left, which is what happens
+/// when it falls through the world and is the one case nobody can walk back to.
 /// </summary>
 [HarmonyPatch(typeof(RespawnOnDrop), "CheckDistances")]
 public static class RespawnOnDrop_CheckDistances_Patch
@@ -23,6 +30,9 @@ public static class RespawnOnDrop_CheckDistances_Patch
     //Fallen back on when the setting is missing or nonsense
     private const float DEFAULT_RANGE = 200f;
     private const float MIN_RANGE = 20f;
+
+    //How far below where it was left an item has to end up before it counts as gone for good
+    private const float FALL_DEPTH = 20f;
 
     private static void Postfix(RespawnOnDrop __instance, ref ValueTuple<bool, bool, bool, bool> __result)
     {
@@ -43,7 +53,24 @@ public static class RespawnOnDrop_CheckDistances_Patch
             return;
         }
 
-        __result.Item2 = !AnyPlayerNear(__instance.transform.position, SqrRange(__instance));
+        __result.Item2 = !AnyPlayerNear(__instance.transform.position, SqrRange(__instance))
+                      && HasFallenOutOfReach(__instance);
+    }
+
+    /// <summary>
+    /// Whether the item is somewhere nobody could walk back to, rather than simply somewhere
+    /// nobody is standing right now.
+    /// </summary>
+    private static bool HasFallenOutOfReach(RespawnOnDrop respawnOnDrop)
+    {
+        NetworkedItem netItem = respawnOnDrop.GetComponent<NetworkedItem>();
+
+        //Nothing to compare it against - leave it be, the world is a better place for it than
+        //somebody's bag it never got announced to.
+        if (netItem == null)
+            return false;
+
+        return netItem.HasFallenBelowReported(FALL_DEPTH);
     }
 
     /// <summary>

@@ -832,7 +832,8 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //An item nobody was near for long enough is taken in by the game and put in the owner's lost
         //and found. It is left switched off wherever it stood, so the transform still describes an
         //item lying in the world - and everyone else would go on being told it is lying there.
-        if (IsInLostAndFound())
+        //Taking it back out hands it straight to the player, and for a moment it can be both
+        if (!Item.IsGrabbed() && IsInLostAndFound())
         {
             Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, in the lost and found");
             return ItemState.InStorage;
@@ -931,6 +932,22 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         Vector3 wirePosition = transform.position - WorldMover.currentMove;
 
         return (wirePosition - lastReportedPosition).sqrMagnitude > PositionThreshold * PositionThreshold;
+    }
+
+    /// <summary>
+    /// Whether the item has ended up well below the place everyone believes it to be - the one way
+    /// something put down in the world becomes unreachable rather than merely unattended.
+    /// </summary>
+    public bool HasFallenBelowReported(float depth)
+    {
+        if (transform == null || lastReportedPosition == Vector3.zero)
+            return false;
+
+        //The origin shift only ever moves the world sideways, so height is the same on every
+        //machine; the shift is folded out anyway to keep this in the coordinates that travel.
+        float wireHeight = transform.position.y - WorldMover.currentMove.y;
+
+        return wireHeight < lastReportedPosition.y - depth;
     }
 
     /// <summary>
