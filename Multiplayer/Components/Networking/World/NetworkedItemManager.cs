@@ -35,10 +35,10 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     {
         get
         {
-            float range = Multiplayer.Settings?.ItemRange ?? MAX_DISTANCE_TO_ITEM;
+            float range = MAX_DISTANCE_TO_ITEM;
 
-            if (range < MIN_DISTANCE_TO_ITEM)
-                range = MAX_DISTANCE_TO_ITEM;
+            if (Multiplayer.Settings != null && Multiplayer.Settings.ItemRange >= MIN_DISTANCE_TO_ITEM)
+                range = Multiplayer.Settings.ItemRange;
 
             return range * range;
         }
