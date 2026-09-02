@@ -24,7 +24,8 @@ public enum ItemState : byte
     InInventory,    //in player's inventory
     Attached,       //attached to another object (e.g. EOT Lanterns)
     OnCar,          //resting on/in a train car (e.g. an item left in a loco cab)
-    InContainer     //stowed inside another item (e.g. a reel of solder in a soldering iron)
+    InContainer,    //stowed inside another item (e.g. a reel of solder in a soldering iron)
+    InStorage       //taken in by a player's lost and found, out of the world until they fetch it
 }
 
 public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
@@ -117,6 +118,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
     //The item this one was last stowed inside, if any
     private ItemContainer lastContainer;
+
+    //Tells us when the game has taken the item in or put it back where it came from
+    private RespawnOnDrop respawnOnDrop;
 
     //Where we last told anyone this item was, in machine-independent coordinates
     private Vector3 lastReportedPosition;
@@ -239,6 +243,12 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             TryGetComponent<GrabHandlerItem>(out grabHandler);
             TryGetComponent<SnappableItem>(out snappableItem);
 
+            //Being taken in happens to an item that has been holding still - nothing is grabbed,
+            //nothing is dropped, and the only thing that changes is that it goes quiet. Without
+            //this, nobody would ever look at it again to notice it had gone.
+            if (TryGetComponent(out respawnOnDrop))
+                respawnOnDrop.Respawned += OnRespawned;
+
             lastState = GetItemState();
             stateDirty = false;
             RecordReportedPose();
@@ -255,6 +265,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             Multiplayer.LogError($"NetworkedItem.Register() Unable to find ItemBase for {name}\r\n{ex.Message}");
             return false;
         }
+    }
+
+    private void OnRespawned(RespawnOnDrop respawn, ItemBase item)
+    {
+        //Either taken into the lost and found or put back where it started - both worth telling
+        Multiplayer.LogDebug(() => $"NetworkedItem.OnRespawned() NetId: {NetId}, name: {name}");
+        stateDirty = true;
     }
 
     private void OnUngrabbed(ControlImplBase obj)
@@ -479,7 +496,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //metres from the shop and a hundred below it. Read off the transform that is a pile of
         //items lying in a field, which is exactly where everyone else was told to put them.
         //Nothing is said about it until it is really out in the world.
-        if (currentState == ItemState.Dropped && !gameObject.activeSelf)
+        //A shop's stock sits in its keeping the same way, and none of that has ever been mentioned
+        //to anyone. Something nobody knows about does not need to be taken away from them.
+        if ((currentState == ItemState.Dropped || (currentState == ItemState.InStorage && createdDirty)) && !gameObject.activeSelf)
         {
             parked = true;
             Multiplayer.LogDebug(() => $"NetworkedItem.GetSnapshot() NetId: {NetId}, name: {name}. Switched off and parked, saying nothing yet");
@@ -495,7 +514,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         //Items stowed in another player's inventory are deactivated for us, we must not report
         //state for those. Items in another player's hand are caught by the remoteHolder check above.
-        if (gameObject.activeInHierarchy &&
+        //Being taken into the lost and found switches the item off as part of doing it, so that one
+        //has to be allowed to speak for itself.
+        if ((gameObject.activeInHierarchy || currentState == ItemState.InStorage) &&
             (currentState != lastState || (currentState == ItemState.OnCar && parentCar.GetNetId() != lastCarNetId)))
         {
             //Only report where a thrown item ended up once it has actually stopped moving
@@ -627,6 +648,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
                 case ItemState.InContainer:
                     HandleInContainerState(snapshot);
+                    break;
+
+                case ItemState.InStorage:
+                    HandleInStorageState(snapshot);
                     break;
 
                 default:
@@ -762,6 +787,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (itemState == ItemState.InHand || itemState == ItemState.InInventory)
             holder = heldByRemote != 0 ? heldByRemote : (NetworkLifecycle.Instance.Client?.PlayerId ?? 0);
 
+        //An item taken in belongs to whoever last had a say about it - which for something lying in
+        //the world is whoever put it there.
+        if (itemState == ItemState.InStorage)
+            holder = LastReportedBy;
+
         var updateData = new ItemUpdateData
         {
             UpdateType = updateType,
@@ -797,6 +827,15 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         {
             Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, in container {Item.InContainer.name}");
             return ItemState.InContainer;
+        }
+
+        //An item nobody was near for long enough is taken in by the game and put in the owner's lost
+        //and found. It is left switched off wherever it stood, so the transform still describes an
+        //item lying in the world - and everyone else would go on being told it is lying there.
+        if (IsInLostAndFound())
+        {
+            Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, in the lost and found");
+            return ItemState.InStorage;
         }
 
         //Being put away takes an item out of the world, and the game is free to do that however it
@@ -848,6 +887,15 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, no car found for parent {transform.parent}, falling back to Dropped");
         return ItemState.Dropped;
 
+    }
+
+    /// <summary>
+    /// Whether the game has taken this item in and put it in the lost and found.
+    /// </summary>
+    private bool IsInLostAndFound()
+    {
+        StorageController storage = StorageController.Instance;
+        return storage != null && storage.StorageLostAndFound != null && storage.StorageLostAndFound.ContainsItem(Item);
     }
 
     /// <summary>
@@ -1274,6 +1322,28 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         this.gameObject.SetActive(false);
     }
 
+    /// <summary>
+    /// Takes the item out of the world because the game it came from has taken it in. We do not put
+    /// it into our own lost and found - it is in theirs, and only they can hand it back.
+    /// </summary>
+    private void HandleInStorageState(ItemUpdateData snapshot)
+    {
+        Multiplayer.LogDebug(() => $"NetworkedItem.HandleInStorageState() NetId: {NetId}, name: {name}, player: {snapshot.Player}");
+
+        heldByRemote = 0;
+        mirroredState = null;
+
+        ReleaseFromRemoteHand();
+        LeaveContainer();
+
+        if (Item.IsSnapped)
+            Item.SnappableItem.SnappedTo.UnsnapItem(false);
+
+        SetRidingPhysics(false);
+
+        gameObject.SetActive(false);
+    }
+
     private void HandleInContainerState(ItemUpdateData snapshot)
     {
         heldByRemote = 0;
@@ -1573,6 +1643,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             Item.Grabbed -= OnGrabbed;
             Item.Ungrabbed -= OnUngrabbed;
             itemBaseToNetworkedItem.Remove(Item);
+
+            if (respawnOnDrop != null)
+                respawnOnDrop.Respawned -= OnRespawned;
         }
         else
         {

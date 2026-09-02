@@ -86,6 +86,11 @@ public class ItemUpdateData
                 writer.Put(ContainerNetId);
                 writer.Put(ContainerSlot);
             }
+            else if (ItemState == ItemState.InStorage)
+            {
+                //Whose keeping it ended up in
+                writer.Put(Player);
+            }
             else if (ItemState == ItemState.OnCar)
             {
                 //position and rotation are relative to the car
@@ -156,6 +161,10 @@ public class ItemUpdateData
             {
                 ContainerNetId = reader.GetUShort();
                 ContainerSlot = reader.GetByte();
+            }
+            else if (ItemState == ItemState.InStorage)
+            {
+                Player = reader.GetByte();
             }
             else if (ItemState == ItemState.OnCar)
             {
