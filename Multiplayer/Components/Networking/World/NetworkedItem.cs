@@ -130,6 +130,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     //What that player is doing with it, so we don't read it back off our own copy
     private ItemState? mirroredState;
 
+    //Set once we have decided the item is switched off and parked, and said so
+    private bool parked;
+
     //When the item first looked stowed, and how long it has to keep looking that way to be believed
     private float stowedSince;
     private const float STOW_SETTLE_TIME = 0.5f;
@@ -370,6 +373,17 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (Item == null && Register() == false)
             return null;
 
+        //Something switched off and parked stays that way until something puts it back into the
+        //world, and a shop's stock is dozens of them. Nothing about one can change in the meantime,
+        //so it is worked out - and spoken of - once, not twenty times a second for the whole game.
+        if (parked)
+        {
+            if (!gameObject.activeSelf)
+                return null;
+
+            parked = false;
+        }
+
         //A shop hands over a basket of purchases in stages. Every piece of it is built at the
         //world origin first, in a row a metre apart and hanging off nothing at all:
         //
@@ -467,6 +481,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //Nothing is said about it until it is really out in the world.
         if (currentState == ItemState.Dropped && !gameObject.activeSelf)
         {
+            parked = true;
             Multiplayer.LogDebug(() => $"NetworkedItem.GetSnapshot() NetId: {NetId}, name: {name}. Switched off and parked, saying nothing yet");
             return null;
         }
