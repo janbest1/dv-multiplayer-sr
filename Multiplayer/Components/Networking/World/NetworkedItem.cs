@@ -158,6 +158,12 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     /// </summary>
     public byte LastReportedBy { get; set; }
 
+    /// <summary>What we last told everyone this item was doing.</summary>
+    public ItemState LastState => lastState;
+
+    /// <summary>Whose keeping this is in, 0 if it is out in the world.</summary>
+    public byte StoredFor => storedFor;
+
     //public void SetOwner(ushort playerId)
     //{
     //    if (OwnerId != playerId)

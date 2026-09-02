@@ -7,6 +7,7 @@ using Multiplayer.Components.Networking;
 using Multiplayer.Networking.Data;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Collections.Generic;
 
 namespace Multiplayer.Components.SaveGame;
 
@@ -14,6 +15,8 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
 {
     private const string ROOT_KEY = "Multiplayer";
     private const string PLAYERS_KEY = "Players";
+    private const string INVENTORY_KEY = "Inventory";
+    private const string LOST_AND_FOUND_KEY = "LostAndFound";
 
     protected override void Awake()
     {
@@ -74,7 +77,16 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
             JObject playerData = [];
             playerData.SetVector3(SaveGameKeys.Player_position, player.AbsoluteWorldPosition);
             playerData.SetFloat(SaveGameKeys.Player_rotation, player.WorldRotationY);
-            //store inventory see StorageSerializer.SaveStorage()
+
+            //A client's game is never written to disk - it would put this world into their own
+            //career - so what they are carrying and what is waiting in their keeping is kept here,
+            //against their name, and handed back when they next arrive. This runs when the game
+            //saves and when somebody leaves, which is the moment that matters.
+            PlayerStorage.CollectForPlayer(player, out List<StorageItemData> inventory, out List<StorageItemData> lostAndFound);
+
+            playerData[INVENTORY_KEY] = JArray.FromObject(inventory);
+            playerData[LOST_AND_FOUND_KEY] = JArray.FromObject(lostAndFound);
+
             players.SetJObject(player.Guid.ToString(), playerData);
         }
 
@@ -85,6 +97,28 @@ public class NetworkedSaveGameManager : SingletonBehaviour<NetworkedSaveGameMana
     public JObject Server_GetPlayerData(SaveGameData data, Guid guid)
     {
         return data?.GetJObject(ROOT_KEY)?.GetJObject(PLAYERS_KEY)?.GetJObject(guid.ToString());
+    }
+
+    /// <summary>
+    /// What we wrote down for this player last time they were here. Nothing at all for somebody
+    /// arriving for the first time, who gets what the game gives anybody starting out.
+    /// </summary>
+    public static List<StorageItemData> Server_GetPlayerItems(JObject playerData, bool lostAndFound)
+    {
+        JToken items = playerData?[lostAndFound ? LOST_AND_FOUND_KEY : INVENTORY_KEY];
+
+        if (items == null)
+            return new List<StorageItemData>();
+
+        try
+        {
+            return items.ToObject<List<StorageItemData>>() ?? new List<StorageItemData>();
+        }
+        catch (Exception ex)
+        {
+            Multiplayer.LogWarning($"NetworkedSaveGameManager.Server_GetPlayerItems() {ex.Message}");
+            return new List<StorageItemData>();
+        }
     }
 
     #endregion

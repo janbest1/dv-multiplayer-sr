@@ -35,6 +35,7 @@ public class ClientboundSaveGameDataPacket
     // public string Debt_insurance { get; set; }
 
     public PlayerItemSaveData[] PlayerItems { get; set; }
+    public PlayerItemSaveData[] PlayerLostAndFound { get; set; }
 
     public float JobManagerTime { get; set; }
 
@@ -62,28 +63,12 @@ public class ClientboundSaveGameDataPacket
             return $"ClientboundSaveGameDataPacket.CreatePacket() UnlockedGen: {{{unlockedGen}}}, PacketGen: {{{packetGen}}},  UnlockedJob: {{{unlockedJob}}}, PacketJob: {{{packetJob}}}";
         });
 
-        List<PlayerItemSaveData> playerItems = [];
-        string[] items = ["shovel", "lighter", "Oiler", "Lantern", "Flashlight", "Hanger", "DuctTape"];
-        string[] states = ["", "", "", "", "{\"Restock\": true,\"Battery_power\": 100}", "", ""];
+        //What this player had with them when they were last here. A client's game never saves, so
+        //this is the only record of it anywhere.
+        PlayerItemSaveData[] playerItems = PlayerStorage.ToPacket(NetworkedSaveGameManager.Server_GetPlayerItems(playerData, false));
+        PlayerItemSaveData[] playerLostAndFound = PlayerStorage.ToPacket(NetworkedSaveGameManager.Server_GetPlayerItems(playerData, true));
 
-        for (int i = 0; i < items.Length; i++)
-        {
-            JObject state;
-
-            if (!string.IsNullOrEmpty(states[i]))
-                state = JObject.Parse(states[i]);
-            else
-                state = [];
-
-            var testItem = new PlayerItemSaveData()
-            {
-                ItemPrefabName = items[i],
-                BelongsToPlayer = true,
-                InventorySlotIndex = 14 + i,
-                State = state
-            };
-            playerItems.Add(testItem);
-        }
+        Multiplayer.LogDebug(() => $"ClientboundSaveGameDataPacket.CreatePacket() {player?.Username} carrying: {playerItems.Length}, in keeping: {playerLostAndFound.Length}");
 
         return new ClientboundSaveGameDataPacket
         {
@@ -106,7 +91,8 @@ public class ClientboundSaveGameDataPacket
 
             JobManagerTime = JobsManager.Instance.Time,
 
-            PlayerItems = playerItems.ToArray()
+            PlayerItems = playerItems,
+            PlayerLostAndFound = playerLostAndFound
         };
     }
 

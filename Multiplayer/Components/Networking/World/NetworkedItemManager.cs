@@ -458,6 +458,8 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         //Player ids are handed out again, so a rejoining player usually gets their old one back. An
         //item still named after them is then taken for one they just reported and never introduced
         //to them - which is why the lantern they walked out with was missing when they came back.
+        List<NetworkedItem> leaving = new List<NetworkedItem>();
+
         foreach (var item in NetworkedItem.GetAll())
         {
             if (item == null)
@@ -466,8 +468,26 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             if (item.LastReportedBy == playerId)
                 item.LastReportedBy = 0;
 
-            //Whatever they were carrying is nobody's now
+            //What they had in their hands, in their bag or in their keeping goes with them: it has
+            //just been written down against their name and it is handed back when they return.
+            //Leaving these copies standing about would have every one of their things arrive twice
+            //on the next visit, and the one left here would be nobody's.
+            if (item.LastState == ItemState.InHand
+                || item.LastState == ItemState.InInventory
+                || (item.LastState == ItemState.InStorage && item.StoredFor == playerId))
+            {
+                leaving.Add(item);
+                continue;
+            }
+
+            //Whatever else pointed at them no longer does
             item.ReleaseHeldBy(playerId);
+        }
+
+        foreach (NetworkedItem item in leaving)
+        {
+            NetworkLifecycle.Instance.Server.LogDebug(() => $"ForgetPlayer({playerId}) {item.name} ({item.NetId}) goes with them");
+            Destroy(item.gameObject);
         }
     }
 

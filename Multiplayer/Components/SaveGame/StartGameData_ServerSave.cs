@@ -5,6 +5,7 @@ using DV.Logic.Job;
 using DV.UserManagement;
 using DV.Utils;
 using Multiplayer.Components.Networking;
+using Multiplayer.Networking.Data.Items;
 using Multiplayer.Components.Networking.World;
 using Multiplayer.Networking.Packets.Clientbound;
 using Multiplayer.Patches.SaveGame;
@@ -62,7 +63,7 @@ public class StartGameData_ServerSave : AStartGameData
         // Load player inventory
         List<StorageItemData> items = [];
 
-        foreach (var item in packet.PlayerItems)
+        foreach (var item in packet.PlayerItems ?? new PlayerItemSaveData[0])
         {
             StorageItemData itemData = new
             (
@@ -82,8 +83,15 @@ public class StartGameData_ServerSave : AStartGameData
 
             items.Add(itemData);
         }
-        Multiplayer.LogDebug(() => $"StartGameData_ServerSave.SetFromPacket() PlayerItems count: {packet.PlayerItems.Length}, items string count: {items.Count()}");
+        Multiplayer.LogDebug(() => $"StartGameData_ServerSave.SetFromPacket() PlayerItems count: {packet.PlayerItems?.Length}, items string count: {items.Count()}");
         saveGameData.SetObject(SaveGameKeys.Storage_Inventory, items);
+
+        //And whatever was waiting in their shed. Without this the lost and found was simply never
+        //part of what a joining player was given back, so it was empty every time.
+        List<StorageItemData> keptItems = PlayerStorage.ToStorage(packet.PlayerLostAndFound);
+
+        Multiplayer.LogDebug(() => $"StartGameData_ServerSave.SetFromPacket() PlayerLostAndFound count: {keptItems.Count}");
+        saveGameData.SetObject(SaveGameKeys.Storage_LostAndFound, keptItems);
 
         //For clients we need to have a session - new users may not have a session and this may also be causing problems with licenses syncing
         if (NetworkLifecycle.Instance.IsHost())
