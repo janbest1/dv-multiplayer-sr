@@ -797,6 +797,14 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
             //Make sure we have a NetworkedItem
             newItem = gameObject.GetOrAddComponent<NetworkedItem>();
         }
+        else
+        {
+            //Back out of the cache: it looks after itself again
+            RespawnOnDrop respawn = newItem.Item != null ? newItem.Item.GetComponent<RespawnOnDrop>() : null;
+
+            if (respawn != null)
+                respawn.enabled = true;
+        }
 
         newItem.gameObject.SetActive(true);
         newItem.NetId = snapshot.ItemNetId;
@@ -990,15 +998,20 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         //NetworkLifecycle.Instance.Client.LogDebug(() => $"Caching Spawned Item: {prefabName ?? ""}");
 
         netItem.gameObject.SetActive(false);
+
+        //Put its own respawning to sleep rather than taking it away. Something waiting in the cache
+        //must not be checking distances or teleporting itself home - but it was being destroyed for
+        //that, and an item that comes back out without one is broken for good: the game reaches for
+        //it whenever the item is stowed, put in a storage or taken in as left behind, and finds
+        //nothing there. Two crashes in one evening's log, and every item this had happened to could
+        //never be taken into a lost and found again.
         RespawnOnDrop respawn = netItem.Item.GetComponent<RespawnOnDrop>();
 
-        Destroy(respawn);
-
-        //NetworkLifecycle.Instance.Client.LogDebug(() => $"Caching Spawned Item: {prefabName ?? ""}: checkWhileDisabled {respawn.checkWhileDisabled}, ignoreDistanceFromSpawnPosition {respawn.ignoreDistanceFromSpawnPosition}, respawnOnDropThroughFloor {respawn.respawnOnDropThroughFloor}");
-
-        //respawn.checkWhileDisabled = false;
-        //respawn.ignoreDistanceFromSpawnPosition = true;
-        //respawn.respawnOnDropThroughFloor = false;
+        if (respawn != null)
+        {
+            respawn.checkWhileDisabled = false;
+            respawn.enabled = false;
+        }
 
         if (SingletonBehaviour<StorageController>.Instance.StorageWorld.ContainsItem(netItem.Item))
         {
