@@ -69,6 +69,9 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     //Items we were asked to build and could not, so the same complaint isn't made every tick
     private readonly HashSet<ushort> uncreatable = new HashSet<ushort>();
+
+    //Reused each tick: everything somebody is standing near
+    private readonly HashSet<NetworkedItem> attended = new HashSet<NetworkedItem>();
     private bool ClientInitialised = false;
 
 
@@ -158,6 +161,7 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         if (NetworkLifecycle.Instance.IsHost())
         {
             UpdatePlayerItemLists();
+            ReviewLeftBehindItems();
             ProcessChanged(tick);
         }
         else
@@ -242,6 +246,36 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                     player.NearbyItems.Remove(kvp.Key);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Puts what nobody is near any more into the keeping of whoever it belongs to.
+    ///
+    /// The game does this for the things it counts as the player's own, and on this machine that
+    /// only ever means the host's. Somebody else's lantern is just a lantern here, so the game
+    /// leaves it lying in the yard for good - which is why the first player to leave came back to
+    /// find their belongings exactly where they had put them, and only the host's had gone home.
+    /// </summary>
+    private void ReviewLeftBehindItems()
+    {
+        attended.Clear();
+
+        foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
+            foreach (NetworkedItem nearbyItem in player.NearbyItems.Keys)
+                attended.Add(nearbyItem);
+
+        foreach (NetworkedItem item in NetworkedItem.GetAll())
+        {
+            if (item == null || attended.Contains(item))
+                continue;
+
+            //Only what somebody has actually carried, and only the kind of thing a lost and found
+            //will take. Anything else stays where it was put, which is where it belongs.
+            if (!GetItemOwner(item.NetId, out ServerPlayer owner))
+                continue;
+
+            item.TakeIntoKeeping(owner.PlayerId);
         }
     }
 
@@ -555,6 +589,41 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     {
         owner = NetworkLifecycle.Instance.Server.ServerPlayers.FirstOrDefault(p => p.OwnsItem(itemNetId));
         return owner != null;
+    }
+
+    /// <summary>
+    /// Whose keeping an item belongs in. Only a client's holding is recorded as such - the host
+    /// takes what is left over, which is also the answer for anything nobody has ever picked up.
+    /// </summary>
+    public byte GetOwningPlayer(ushort itemNetId)
+    {
+        if (NetworkLifecycle.Instance.Server != null && GetItemOwner(itemNetId, out ServerPlayer owner))
+            return owner.PlayerId;
+
+        return NetworkLifecycle.Instance.Client?.PlayerId ?? 0;
+    }
+
+    /// <summary>
+    /// Hands an item to one player and takes it off everybody else. Nobody named means it is the
+    /// host's again, which is what picking something up here amounts to.
+    /// </summary>
+    public void SetOwningPlayer(ushort itemNetId, byte playerId)
+    {
+        if (NetworkLifecycle.Instance.Server == null)
+            return;
+
+        foreach (ServerPlayer player in NetworkLifecycle.Instance.Server.ServerPlayers)
+        {
+            if (player.PlayerId == playerId)
+            {
+                if (!player.OwnsItem(itemNetId))
+                    player.AddOwnedItem(itemNetId);
+            }
+            else
+            {
+                player.RemoveOwnedItem(itemNetId);
+            }
+        }
     }
     #endregion
 

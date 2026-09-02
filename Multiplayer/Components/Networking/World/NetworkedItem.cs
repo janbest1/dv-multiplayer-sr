@@ -137,6 +137,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     //Set once we have decided the item is switched off and parked, and said so
     private bool parked;
 
+    //Whose lost and found is keeping this, 0 if it is out in the world
+    private byte storedFor;
+
     //When the item first looked stowed, and how long it has to keep looking that way to be believed
     private float stowedSince;
     private const float STOW_SETTLE_TIME = 0.5f;
@@ -271,6 +274,23 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     {
         //Either taken into the lost and found or put back where it started - both worth telling
         Multiplayer.LogDebug(() => $"NetworkedItem.OnRespawned() NetId: {NetId}, name: {name}");
+
+        //Only the host decides anything is left behind, and it decides for everyone - including
+        //for the player who left first, whose things are still lying here and are nobody else's
+        //to keep. The host's own game can only ever put something in the host's own box, so
+        //anything belonging to somebody else is taken back out of it and handed to them instead.
+        if (NetworkLifecycle.Instance.IsHost() && IsInLostAndFound())
+        {
+            storedFor = NetworkedItemManager.Instance?.GetOwningPlayer(NetId) ?? 0;
+
+            if (storedFor != (NetworkLifecycle.Instance.Client?.PlayerId ?? 0))
+            {
+                Multiplayer.LogDebug(() => $"NetworkedItem.OnRespawned() NetId: {NetId}, name: {name}. Keeping it for player {storedFor}, not for us");
+                StorageController.Instance.RemoveItemFromLostAndFound(Item);
+                gameObject.SetActive(false);
+            }
+        }
+
         stateDirty = true;
     }
 
@@ -290,6 +310,11 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //It is in our hands now, whoever we thought was carrying it no longer is
         heldByRemote = 0;
         mirroredState = null;
+        storedFor = 0;
+
+        //And it is ours now, whoever was keeping it before
+        if (NetworkLifecycle.Instance.IsHost())
+            NetworkedItemManager.Instance?.SetOwningPlayer(NetId, NetworkLifecycle.Instance.Client?.PlayerId ?? 0);
 
         stateDirty = true;
     }
@@ -626,6 +651,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         {
             Multiplayer.Log($"NetworkedItem.ApplySnapshot() netId: {snapshot?.ItemNetId}, ItemUpdateType: {snapshot?.UpdateType}, ItemState: {snapshot?.ItemState}, Active state: {gameObject.activeInHierarchy}");
 
+            //Whatever we are being told now settles where the item is. Anything we were keeping it
+            //for is over unless the state we are about to read says otherwise.
+            storedFor = 0;
+
             switch (snapshot.ItemState)
             {
                 case ItemState.Dropped:
@@ -787,10 +816,10 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         if (itemState == ItemState.InHand || itemState == ItemState.InInventory)
             holder = heldByRemote != 0 ? heldByRemote : (NetworkLifecycle.Instance.Client?.PlayerId ?? 0);
 
-        //An item taken in belongs to whoever last had a say about it - which for something lying in
-        //the world is whoever put it there.
+        //An item taken in says whose keeping it is in, so that player's game can put it in their
+        //own lost and found and hand it back to them there.
         if (itemState == ItemState.InStorage)
-            holder = LastReportedBy;
+            holder = storedFor != 0 ? storedFor : LastReportedBy;
 
         var updateData = new ItemUpdateData
         {
@@ -829,9 +858,16 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             return ItemState.InContainer;
         }
 
-        //An item nobody was near for long enough is taken in by the game and put in the owner's lost
-        //and found. It is left switched off wherever it stood, so the transform still describes an
-        //item lying in the world - and everyone else would go on being told it is lying there.
+        //Something nobody was near is taken in and kept for whoever it belongs to. It is left
+        //switched off wherever it stood, so the transform still describes an item lying in the
+        //world - and everyone else would go on being told it is lying there.
+        //
+        //This is asked before the lost and found itself, because the two do not always agree: an
+        //item belonging to a client is taken out of the host's own box again the moment it lands
+        //there, and it is still being kept for them afterwards.
+        if (storedFor != 0)
+            return ItemState.InStorage;
+
         //Taking it back out hands it straight to the player, and for a moment it can be both
         if (!Item.IsGrabbed() && IsInLostAndFound())
         {
@@ -1310,9 +1346,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //Or stowed inside something the player is carrying
         LeaveContainer();
 
+        //Whoever has it in their hands owns it, and nobody else does any more
         if (NetworkLifecycle.Instance.IsHost())
-            if (NetworkLifecycle.Instance.Server.TryGetServerPlayer(snapshot.Player, out ServerPlayer player) && !player.OwnsItem(NetId))
-                player.AddOwnedItem(NetId);
+            NetworkedItemManager.Instance?.SetOwningPlayer(NetId, snapshot.Player);
 
         //Show it in the other player's hand if we have a model to hang it off
         if (snapshot.ItemState == ItemState.InHand && TryShowInRemoteHand(snapshot.Player))
@@ -1333,6 +1369,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         heldByRemote = 0;
         mirroredState = null;
+        storedFor = snapshot.Player;
 
         ReleaseFromRemoteHand();
         LeaveContainer();
@@ -1342,7 +1379,22 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         SetRidingPhysics(false);
 
+        //Out of the world either way - it is in somebody's keeping now
         gameObject.SetActive(false);
+
+        //And if that somebody is us, into our own lost and found with it, so it is waiting in the
+        //shed at whatever station we walk into next. A lost and found only takes what belongs to a
+        //player; anything else would be turned away with an error, and stays simply put away.
+        if (snapshot.Player == 0 || snapshot.Player != (NetworkLifecycle.Instance.Client?.PlayerId ?? 0))
+            return;
+
+        if (Item.InventorySpecs == null || !Item.InventorySpecs.BelongsToPlayer || IsInLostAndFound())
+            return;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.HandleInStorageState() NetId: {NetId}, name: {name}. Into our own lost and found");
+
+        transform.SetParent(WorldMover.OriginShiftParent);
+        StorageController.Instance.AddItemToLostAndFound(Item, true);
     }
 
     private void HandleInContainerState(ItemUpdateData snapshot)
@@ -1486,6 +1538,44 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         Multiplayer.LogDebug(() => $"NetworkedItem.ReviewRemoteHolder() NetId: {NetId}, name: {name}. Player {holder.Username} is here now");
         TryShowInRemoteHand(heldByRemote);
+    }
+
+    /// <summary>
+    /// Takes the item into a player's keeping because nobody is near it any more.
+    ///
+    /// This is only for what the host's own game will not take in by itself - a copy of somebody
+    /// else's belongings is nobody's as far as this machine is concerned, and would lie in the
+    /// yard until the end of time. What the host does count as its own it puts in its own lost and
+    /// found, which is the right box for it anyway.
+    /// </summary>
+    public void TakeIntoKeeping(byte playerId)
+    {
+        if (playerId == 0 || storedFor != 0 || createdDirty || !initialised || Item == null)
+            return;
+
+        //Only things lying in the world. Anything in a hand, a bag, a container or on a car is
+        //somewhere on purpose.
+        if (lastState != ItemState.Dropped)
+            return;
+
+        if (Item.InventorySpecs == null)
+            return;
+
+        //The host's own belongings are the game's business, not ours - it has a real box to put
+        //them in and we do not. Anything of ours it will not take stays out in the world, which is
+        //better than being hidden into nowhere.
+        if (playerId == (NetworkLifecycle.Instance.Client?.PlayerId ?? 0) || Item.InventorySpecs.BelongsToPlayer)
+            return;
+
+        //A lost and found only takes essentials; everything else the game leaves lying about too
+        if (!Item.InventorySpecs.IsEssential)
+            return;
+
+        Multiplayer.LogDebug(() => $"NetworkedItem.TakeIntoKeeping({playerId}) NetId: {NetId}, name: {name}. Nobody near, keeping it for them");
+
+        storedFor = playerId;
+        gameObject.SetActive(false);
+        stateDirty = true;
     }
 
     /// <summary>
