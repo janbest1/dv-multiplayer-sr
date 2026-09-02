@@ -118,6 +118,9 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     //The item this one was last stowed inside, if any
     private ItemContainer lastContainer;
 
+    //Where we last told anyone this item was, in machine-independent coordinates
+    private Vector3 lastReportedPosition;
+
     //Set while we are only mirroring this item in another player's hand
     private NetworkedPlayer remoteHolder;
 
@@ -235,6 +238,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
             lastState = GetItemState();
             stateDirty = false;
+            RecordReportedPose();
 
             //Only the host names items. A client's copy is told the name along with the item.
             if (Guid == Guid.Empty && NetworkLifecycle.Instance.IsHost())
@@ -404,11 +408,18 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         //evaluating it until it comes to rest, otherwise it never leaves the Thrown state.
         bool settling = !wasThrown && lastState == ItemState.Thrown;
 
+        //Where an item is only ever travels as part of what it is doing, and nothing has ever
+        //watched for it moving on its own. An item can be built in one place and put in position a
+        //moment later - a shop laying out an armful of purchases does exactly that - and with the
+        //state the same before and after, nobody was ever told where it ended up. Twenty of them
+        //bought at once, and every one of them stood where it was built for everyone else.
+        bool moved = lastState == ItemState.Dropped && HasMovedSinceReported();
+
         //An item nobody has been told about yet has something to say even when nothing about it has
         //changed. A client buys a beacon, puts it down and leaves it alone: it holds still, so
         //nothing is dirty, and the introduction that would make it real for everyone else never
         //goes out. It only appeared once the player happened to pick it up again.
-        if (!createdDirty && !stateDirty && !hasDirtyVals && !parentChanged && !settling)
+        if (!createdDirty && !stateDirty && !hasDirtyVals && !parentChanged && !settling && !moved)
             return null;
 
         ItemState currentState = GetItemState();
@@ -431,6 +442,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
             stowedSince = 0f;
         }
 
+        //Only worth passing on once it has come to rest, and only while it is still something we
+        //send a world position for at all
+        if (moved && currentState == ItemState.Dropped && HasSettled())
+            stateDirty = true;
+        else
+            moved = false;
+
         //Items stowed in another player's inventory are deactivated for us, we must not report
         //state for those. Items in another player's hand are caught by the remoteHolder check above.
         if (gameObject.activeInHierarchy &&
@@ -446,7 +464,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         if (!createdDirty)
         {
-            if (lastState != currentState)
+            if (lastState != currentState || moved)
                 updateType |= ItemUpdateData.ItemUpdateType.ItemState;
 
             if (hasDirtyVals)
@@ -467,6 +485,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         lastState = currentState;
         lastCarNetId = currentState == ItemState.OnCar ? parentCar.GetNetId() : (ushort)0;
         LastDirtyTick = NetworkLifecycle.Instance.Tick;
+        RecordReportedPose();
         snapshot = CreateUpdateData(updateType);
 
         createdDirty = false;
@@ -597,6 +616,7 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     {
         RefreshParentCar(true);
         RefreshContainer();
+        RecordReportedPose();
         lastState = GetItemState();
         lastCarNetId = lastState == ItemState.OnCar ? parentCar.GetNetId() : (ushort)0;
     }
@@ -767,6 +787,32 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         Multiplayer.LogDebug(() => $"GetItemState() NetId: {NetId}, {name}, no car found for parent {transform.parent}, falling back to Dropped");
         return ItemState.Dropped;
 
+    }
+
+    /// <summary>
+    /// Remembers where the item is now as the place everyone else believes it to be.
+    /// </summary>
+    private void RecordReportedPose()
+    {
+        if (transform == null)
+            return;
+
+        //Each machine folds its own origin shift into every position it sends, so the comparison
+        //has to be made in the coordinates that travel, not the ones we happen to be standing in
+        lastReportedPosition = transform.position - WorldMover.currentMove;
+    }
+
+    /// <summary>
+    /// Whether the item is somewhere other than where we last said it was.
+    /// </summary>
+    private bool HasMovedSinceReported()
+    {
+        if (transform == null)
+            return false;
+
+        Vector3 wirePosition = transform.position - WorldMover.currentMove;
+
+        return (wirePosition - lastReportedPosition).sqrMagnitude > PositionThreshold * PositionThreshold;
     }
 
     /// <summary>
