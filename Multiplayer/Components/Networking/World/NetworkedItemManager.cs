@@ -43,6 +43,13 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
     //cache for client-sided items & spawns
     private Dictionary<string, List<NetworkedItem>> CachedItems = new(1024); //Client cached items
     private Dictionary<string, InventoryItemSpec> ItemPrefabs = new(1024);   //Item prefabs
+
+    //How much of the game's item catalogue the lookup above was built from, so a miss can tell
+    //"nothing new to find" from "the catalogue has grown since"
+    private int prefabLookupSourceCount = -1;
+
+    //Items we were asked to build and could not, so the same complaint isn't made every tick
+    private readonly HashSet<ushort> uncreatable = new HashSet<ushort>();
     private bool ClientInitialised = false;
 
 
@@ -441,6 +448,12 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
                 NetworkLifecycle.Instance.Server.LogWarning($"NetworkedItemManager.ProcessReceivedAsHost() Player action validation failed for ItemNetId: {snapshot.ItemNetId}");
             }
         }
+        else if (uncreatable.Contains(snapshot.ItemNetId))
+        {
+            //We already said once that we cannot build this one. Its owner has no way of knowing
+            //and will keep telling us about it for as long as they hold on to it.
+            NetworkLifecycle.Instance.Server.LogDebug(() => $"NetworkedItemManager.ProcessReceivedAsHost() Still nothing to apply {snapshot.UpdateType} to for ItemNetId: {snapshot.ItemNetId}");
+        }
         else
         {
             NetworkLifecycle.Instance.Server.LogError($"NetworkedItemManager.ProcessReceivedAsHost() NetworkedItem not found! Update Type: {snapshot.UpdateType}, ItemNetId: {snapshot.ItemNetId}, prefabName: {snapshot.PrefabName}");
@@ -680,11 +693,15 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
         {
             //GameObject prefabObj = Resources.Load(snapshot.PrefabName) as GameObject;
             
-            if (!ItemPrefabs.TryGetValue(snapshot.PrefabName, out InventoryItemSpec spec))
+            if (!TryGetPrefab(snapshot.PrefabName, out InventoryItemSpec spec))
             {
-                Multiplayer.LogError($"NetworkedItemManager.CreateItem() Unable to load prefab for ItemNetId: {snapshot.ItemNetId}, prefabName: {snapshot.PrefabName}");
+                if (uncreatable.Add(snapshot.ItemNetId))
+                    Multiplayer.LogError($"NetworkedItemManager.CreateItem() Unable to load prefab for ItemNetId: {snapshot.ItemNetId}, prefabName: {snapshot.PrefabName}");
+
                 return;
             }
+
+            uncreatable.Remove(snapshot.ItemNetId);
 
             GetSpawnPose(snapshot, out Vector3 spawnPosition, out Quaternion spawnRotation);
 
@@ -724,15 +741,38 @@ public class NetworkedItemManager : SingletonBehaviour<NetworkedItemManager>
 
     private void BuildPrefabLookup()
     {
-        NetworkLifecycle.Instance.Client.LogDebug(() => $"BuildPrefabLookup()");
+        var items = Globals.G.Items.items;
+        prefabLookupSourceCount = items.Count();
 
-        foreach (var item in Globals.G.Items.items)
+        foreach (var item in items)
         {
             if (!ItemPrefabs.ContainsKey(item.ItemPrefabName))
-            {
-                ItemPrefabs[item.itemPrefabName] = item;
-            }
+                ItemPrefabs[item.ItemPrefabName] = item;
         }
+
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.BuildPrefabLookup() {ItemPrefabs.Count} prefabs from a catalogue of {prefabLookupSourceCount}");
+    }
+
+    /// <summary>
+    /// Finds the prefab an item was built from.
+    ///
+    /// The catalogue is read once, when the world loads. A mod that registers items of its own
+    /// after that is not in it, and nobody can then build what one of its items - so a signal disc
+    /// one player bought simply never appeared for anyone else. A miss is worth looking again for,
+    /// but only while there is something new to find.
+    /// </summary>
+    private bool TryGetPrefab(string prefabName, out InventoryItemSpec spec)
+    {
+        if (ItemPrefabs.TryGetValue(prefabName, out spec))
+            return true;
+
+        if (Globals.G.Items.items.Count() == prefabLookupSourceCount)
+            return false;
+
+        Multiplayer.LogDebug(() => $"NetworkedItemManager.TryGetPrefab({prefabName}) Not known, the catalogue has grown - reading it again");
+        BuildPrefabLookup();
+
+        return ItemPrefabs.TryGetValue(prefabName, out spec);
     }
 
     /// <summary>
