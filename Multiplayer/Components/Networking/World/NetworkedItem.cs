@@ -935,22 +935,6 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
     }
 
     /// <summary>
-    /// Whether the item has ended up well below the place everyone believes it to be - the one way
-    /// something put down in the world becomes unreachable rather than merely unattended.
-    /// </summary>
-    public bool HasFallenBelowReported(float depth)
-    {
-        if (transform == null || lastReportedPosition == Vector3.zero)
-            return false;
-
-        //The origin shift only ever moves the world sideways, so height is the same on every
-        //machine; the shift is folded out anyway to keep this in the coordinates that travel.
-        float wireHeight = transform.position.y - WorldMover.currentMove.y;
-
-        return wireHeight < lastReportedPosition.y - depth;
-    }
-
-    /// <summary>
     /// Whether the item has stopped moving. Used to find where a thrown item came to rest.
     /// </summary>
     private bool HasSettled()

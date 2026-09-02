@@ -54,8 +54,6 @@ public class Settings : UnityModManager.ModSettings, IDrawable
     public string Details = "";
     [Draw("Item Range (m)", Tooltip = "How far from a player an item is told about. Something left further away than this stays unseen until that player comes closer.")]
     public int ItemRange = 250;
-    [Draw("Lost Item Range (m)", Tooltip = "How close a player has to be for an item left in the world to stay there. With nobody within this range the game takes it back to its owner's lost and found.")]
-    public int LostItemRange = 200;
 
     [Space(10)]
     [Header("Lobby Server")]
