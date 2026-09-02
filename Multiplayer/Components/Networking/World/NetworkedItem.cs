@@ -831,14 +831,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
 
         //An item taken in says whose keeping it is in, so that player's game can put it in their
         //own lost and found and hand it back to them there.
+        //
+        //Unless the host has handed it on, whatever is in our own keeping is ours: it is in our box,
+        //here, and nobody said otherwise. Asking who last spoke about it instead was how a host's
+        //own shopping came to be filed under whoever had picked one up off the counter - the host
+        //had them in its shed and the other player was told they were theirs.
         if (itemState == ItemState.InStorage)
-        {
-            holder = storedFor != 0 ? storedFor : LastReportedBy;
-
-            //Nobody has told us whose it is because nobody had to: we are the ones keeping it
-            if (holder == 0 && !NetworkLifecycle.Instance.IsHost())
-                holder = NetworkLifecycle.Instance.Client?.PlayerId ?? 0;
-        }
+            holder = storedFor != 0 ? storedFor : (NetworkLifecycle.Instance.Client?.PlayerId ?? 0);
 
         var updateData = new ItemUpdateData
         {
