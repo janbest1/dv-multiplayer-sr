@@ -498,6 +498,13 @@ public class NetworkedItem : IdMonoBehaviour<ushort, NetworkedItem>
         lastCarNetId = currentState == ItemState.OnCar ? parentCar.GetNetId() : (ushort)0;
         LastDirtyTick = NetworkLifecycle.Instance.Tick;
         RecordReportedPose();
+
+        //Where a bought item actually is when it first speaks up decides where everyone else
+        //puts it, and reading that off the transform has been wrong twice now. Say what the
+        //game itself thinks is holding it.
+        if (currentState == ItemState.Dropped)
+            Multiplayer.LogDebug(() => $"NetworkedItem.GetSnapshot() NetId: {NetId}, name: {name}, {updateType} as Dropped. active: {gameObject.activeSelf}, parent: {GetPath(transform.parent)}, inventory: {Inventory.Instance?.Contains(gameObject, false)}, worldStorage: {StorageController.Instance?.StorageWorld?.ContainsItem(Item)}, storageInventory: {StorageController.Instance?.StorageInventory?.ContainsItem(Item)}");
+
         snapshot = CreateUpdateData(updateType);
 
         createdDirty = false;
