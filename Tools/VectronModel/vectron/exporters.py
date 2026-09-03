@@ -101,32 +101,55 @@ def write_mtl(materials: dict[str, Material], used: Iterable[str], path: str) ->
 
 
 def write_viewer_payload(objects: Sequence[Mesh], materials: dict[str, Material],
-                         path: str, crease: float = 38.0) -> dict:
-    """Interleaved float32 position+normal buffers grouped per material,
-    base64 encoded - consumed directly by the three.js viewer."""
-    groups: dict[str, list[float]] = {}
-    for mesh in objects:
+                         path: str, crease: float = 38.0,
+                         extra: Sequence[Mesh] = ()) -> dict:
+    """Quantised geometry for the web viewer.
+
+    Positions become 16 bit integers inside the model's bounding box (0.3 mm
+    resolution over a 19 m locomotive) and normals 8 bit, which cuts the
+    payload to roughly a third of raw float32 with no visible difference.
+    Groups are keyed "<object>|<material>" so the viewer can toggle parts and
+    recolour a livery without reloading anything.
+    """
+    meshes = list(objects) + list(extra)
+    lo = [1e30] * 3
+    hi = [-1e30] * 3
+    for mesh in meshes:
+        for v in mesh.verts:
+            for c in range(3):
+                lo[c] = min(lo[c], v[c])
+                hi[c] = max(hi[c], v[c])
+    span = [max(1e-6, hi[c] - lo[c]) for c in range(3)]
+
+    groups: dict[str, tuple[list[int], list[int]]] = {}
+    for mesh in meshes:
         cn = corner_normals(mesh, crease)
         for fi, face in enumerate(mesh.faces):
-            mat = mesh.mats[fi]
-            buf = groups.setdefault(mat, [])
+            key = f"{mesh.name}|{mesh.mats[fi]}"
+            pos, nrm = groups.setdefault(key, ([], []))
             for k in range(1, len(face) - 1):
                 for idx in (0, k, k + 1):
                     v = mesh.verts[face[idx]]
                     n = cn[fi][idx]
-                    buf.extend((v[0], v[1], v[2], n[0], n[1], n[2]))
-    payload = {"materials": {}, "groups": {}}
-    for name, buf in groups.items():
-        m = materials.get(name)
-        payload["groups"][name] = base64.b64encode(
-            struct.pack(f"<{len(buf)}f", *buf)).decode("ascii")
+                    for c in range(3):
+                        pos.append(int(round((v[c] - lo[c]) / span[c] * 65535.0)))
+                        nrm.append(max(-127, min(127, int(round(n[c] * 127.0)))))
+
+    payload = {
+        "bounds": {"lo": [round(v, 5) for v in lo], "span": [round(v, 5) for v in span]},
+        "materials": {}, "groups": {},
+    }
+    for key, (pos, nrm) in groups.items():
+        payload["groups"][key] = {
+            "p": base64.b64encode(struct.pack(f"<{len(pos)}H", *pos)).decode("ascii"),
+            "n": base64.b64encode(struct.pack(f"<{len(nrm)}b", *nrm)).decode("ascii"),
+        }
+    for name, m in materials.items():
         payload["materials"][name] = {
-            "color": [round(c, 4) for c in (m.color if m else (0.8, 0.8, 0.8))],
-            "roughness": round(m.roughness, 3) if m else 0.6,
-            "metallic": round(m.metallic, 3) if m else 0.0,
-            "alpha": round(m.alpha, 3) if m else 1.0,
-            "emission": round(m.emission, 3) if m else 0.0,
+            "color": [round(c, 4) for c in m.color],
+            "roughness": round(m.roughness, 3), "metallic": round(m.metallic, 3),
+            "alpha": round(m.alpha, 3), "emission": round(m.emission, 3),
         }
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh)
+        json.dump(payload, fh, separators=(",", ":"))
     return payload
