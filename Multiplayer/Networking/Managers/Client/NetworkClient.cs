@@ -1858,6 +1858,21 @@ public class NetworkClient : NetworkManager
         }, DeliveryMethod.ReliableUnordered);
     }
 
+    /// <summary>
+    /// Tells the host which item is now the booklet for a job we were already running when we
+    /// rejoined. Without this the host keeps pointing at the copy that left with us.
+    /// </summary>
+    public void SendJobBooklet(ushort jobNetId, ushort itemNetId)
+    {
+        LogDebug(() => $"SendJobBooklet({jobNetId}, {itemNetId})");
+
+        SendPacketToServer(new ServerboundJobBookletPacket
+        {
+            JobNetId = jobNetId,
+            ItemNetId = itemNetId
+        }, DeliveryMethod.ReliableUnordered);
+    }
+
     public void SendWarehouseRequest(WarehouseAction action, ushort netId)
     {
         SendPacketToServer(new ServerboundWarehouseMachineControllerRequestPacket

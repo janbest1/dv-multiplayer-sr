@@ -351,6 +351,11 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
 
             takenJobs.Add(newJob);
             newJob.TakeJob(true); //take job as if loaded from save to prevent debt controller kicking in
+
+            //A job we were already running has its booklet in our own inventory, restored from the
+            //host's save with nothing in it but a job id. Now that the job itself is here, the two
+            //can be put back together.
+            JobBookletRestorer.JobArrived(networkedJob);
         }
         else
         {

@@ -25,6 +25,17 @@ public static class JobBooklet_Patch
     //}
 
 
+    /// <summary>
+    /// The booklet has just read its job id back out of the save. On a client the game's own
+    /// matching never runs, so nothing would ever give it its job.
+    /// </summary>
+    [HarmonyPatch(nameof(JobBooklet.OnSaveDataLoaded))]
+    [HarmonyPostfix]
+    private static void OnSaveDataLoaded(JobBooklet __instance)
+    {
+        JobBookletRestorer.BookletLoaded(__instance);
+    }
+
     [HarmonyPatch(nameof(JobBooklet.DestroyJobBooklet))]
     [HarmonyPrefix]
     private static void DestroyJobBooklet(JobBooklet __instance)
