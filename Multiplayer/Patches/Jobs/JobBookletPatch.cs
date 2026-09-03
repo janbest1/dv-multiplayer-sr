@@ -33,7 +33,7 @@ public static class JobBooklet_Patch
     [HarmonyPostfix]
     private static void OnSaveDataLoaded(JobBooklet __instance)
     {
-        JobBookletRestorer.BookletLoaded(__instance);
+        JobPaperwork.BookletLoaded(__instance);
     }
 
     [HarmonyPatch(nameof(JobBooklet.DestroyJobBooklet))]

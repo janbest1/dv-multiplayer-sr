@@ -26,6 +26,7 @@ using Multiplayer.Components.Networking.World;
 using Multiplayer.Components.SaveGame;
 using Multiplayer.Networking.Data;
 using Multiplayer.Networking.Data.Items;
+using Multiplayer.Networking.Data.Jobs;
 using Multiplayer.Networking.Data.Player;
 using Multiplayer.Networking.Data.Train;
 using Multiplayer.Networking.Data.World;
@@ -411,7 +412,7 @@ public class NetworkClient : NetworkManager
         yield return new WaitForSeconds(0.25f);
 
         //Anything the player still carries for a job that no longer exists can go now.
-        JobBookletRestorer.JoinFinished();
+        JobPaperwork.JoinFinished();
 
         // Start culling player models
         ClientPlayerManager.StartCulling();
@@ -1862,17 +1863,18 @@ public class NetworkClient : NetworkManager
     }
 
     /// <summary>
-    /// Tells the host which item is now the booklet for a job we were already running when we
-    /// rejoined. Without this the host keeps pointing at the copy that left with us.
+    /// Tells the host which item is now a job's paperwork after we rejoined carrying it. Without
+    /// this the host keeps pointing at the copy that left with us.
     /// </summary>
-    public void SendJobBooklet(ushort jobNetId, ushort itemNetId)
+    public void SendJobPaperwork(ushort jobNetId, ushort itemNetId, ValidationType kind)
     {
-        LogDebug(() => $"SendJobBooklet({jobNetId}, {itemNetId})");
+        LogDebug(() => $"SendJobPaperwork({jobNetId}, {itemNetId}, {kind})");
 
-        SendPacketToServer(new ServerboundJobBookletPacket
+        SendPacketToServer(new ServerboundJobPaperworkPacket
         {
             JobNetId = jobNetId,
-            ItemNetId = itemNetId
+            ItemNetId = itemNetId,
+            Kind = kind
         }, DeliveryMethod.ReliableUnordered);
     }
 

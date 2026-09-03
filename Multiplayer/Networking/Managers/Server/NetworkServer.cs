@@ -1,5 +1,4 @@
 using DV;
-using DV.Booklets;
 using DV.Customization;
 using DV.Customization.Paint;
 using DV.Garages;
@@ -234,7 +233,7 @@ public class NetworkServer : NetworkManager
 
         // Jobs
         netPacketProcessor.SubscribeReusable<ServerboundJobValidateRequestPacket, ITransportPeer>(OnServerboundJobValidateRequestPacket);
-        netPacketProcessor.SubscribeReusable<ServerboundJobBookletPacket, ITransportPeer>(OnServerboundJobBookletPacket);
+        netPacketProcessor.SubscribeReusable<ServerboundJobPaperworkPacket, ITransportPeer>(OnServerboundJobPaperworkPacket);
         netPacketProcessor.SubscribeReusable<ServerboundWarehouseMachineControllerRequestPacket, ITransportPeer>(OnServerboundWarehouseMachineControllerRequestPacket);
 
         // Items
@@ -2032,44 +2031,55 @@ public class NetworkServer : NetworkManager
     }
 
     /// <summary>
-    /// A player who rejoined still carries the booklet for one of their jobs, but as a new item -
-    /// the one we knew about went with them when they left. Give the job its booklet back, and
-    /// print the job into our own copy so it does not read "[NO JOB]" for everyone else.
+    /// A player who rejoined still carries a job's paperwork, but as a new item - the one we knew
+    /// about went with them when they left. Give the job its paperwork back, and print the job into
+    /// our own copy so it is not blank for everyone else.
     /// </summary>
-    private void OnServerboundJobBookletPacket(ServerboundJobBookletPacket packet, ITransportPeer peer)
+    private void OnServerboundJobPaperworkPacket(ServerboundJobPaperworkPacket packet, ITransportPeer peer)
     {
         if (!TryGetServerPlayer(peer, out ServerPlayer player))
             return;
 
         if (!NetworkedJob.Get(packet.JobNetId, out NetworkedJob networkedJob) || networkedJob.Job == null)
         {
-            LogWarning($"OnServerboundJobBookletPacket() job {packet.JobNetId} does not exist");
+            LogWarning($"OnServerboundJobPaperworkPacket() job {packet.JobNetId} does not exist");
             return;
         }
 
         if (!NetworkedItem.TryGet(packet.ItemNetId, out NetworkedItem netItem))
         {
-            LogWarning($"OnServerboundJobBookletPacket() item {packet.ItemNetId} does not exist");
+            LogWarning($"OnServerboundJobPaperworkPacket() item {packet.ItemNetId} does not exist");
             return;
         }
 
-        JobBooklet booklet = netItem.GetTrackedItem<JobBooklet>();
+        LogDebug(() => $"OnServerboundJobPaperworkPacket() {player.Username} still carries the {packet.Kind} for job {networkedJob.Job.ID}, it is item {packet.ItemNetId} now");
 
-        if (booklet == null)
+        //Our own copy came out of the item sync as plain paper, so it has to be printed too.
+        if (packet.Kind == ValidationType.JobBooklet)
         {
-            LogWarning($"OnServerboundJobBookletPacket() item {packet.ItemNetId} is not a job booklet");
+            JobBooklet booklet = netItem.GetComponent<JobBooklet>();
+
+            if (booklet == null)
+            {
+                LogWarning($"OnServerboundJobPaperworkPacket() item {packet.ItemNetId} is not a job booklet");
+                return;
+            }
+
+            JobPaperwork.PrintBooklet(booklet, networkedJob.Job);
+        }
+        else if (JobPaperwork.PrintOverview(netItem.gameObject, networkedJob.Job) == null)
+        {
             return;
         }
 
-        LogDebug(() => $"OnServerboundJobBookletPacket() {player.Username} still carries the booklet for job {networkedJob.Job.ID}, it is item {packet.ItemNetId} now");
+        //An item restored from a player's storage is tracked as plain paper until now, and a job
+        //will not take plain paper as its paperwork.
+        JobPaperwork.Adopt(netItem, packet.Kind);
 
-        if (!booklet.HasJobAssigned())
-        {
-            booklet.AssignJob(networkedJob.Job);
-            BookletCreator_Job.Render(booklet.gameObject, new Job_data(networkedJob.Job));
-        }
-
-        networkedJob.JobBooklet = netItem;
+        if (packet.Kind == ValidationType.JobBooklet)
+            networkedJob.JobBooklet = netItem;
+        else
+            networkedJob.JobOverview = netItem;
     }
 
     private void OnServerboundWarehouseMachineControllerRequestPacket(ServerboundWarehouseMachineControllerRequestPacket packet, ITransportPeer peer)

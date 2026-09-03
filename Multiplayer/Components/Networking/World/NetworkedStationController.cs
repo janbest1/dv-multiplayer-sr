@@ -275,6 +275,10 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
 
         //Setup handlers
         networkedJob.OnJobDirty += OnJobDirty;
+
+        //An overview sheet the host was carrying comes back from its save as blank paper - the game
+        //never matches those up, not even in single player.
+        JobPaperwork.HostJobLoaded(networkedJob);
     }
 
     private void OnJobDirty(NetworkedJob job)
@@ -339,7 +343,11 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
             StationController.logicStation.AddJobToStation(newJob);
             StationController.processedNewJobs.Add(newJob);
 
-            if (jobData.ItemNetID != 0)
+            //The sheet for this job may be the one this player walked out of the station with, and
+            //has just brought back. If so the station must not print a second copy of it.
+            bool alreadyCarried = JobPaperwork.JobArrived(networkedJob);
+
+            if (!alreadyCarried && jobData.ItemNetID != 0)
             {
                 GenerateOverview(networkedJob, jobData.ItemNetID, jobData.ItemPosition);
             }
@@ -355,7 +363,7 @@ public class NetworkedStationController : IdMonoBehaviour<uint, NetworkedStation
             //A job we were already running has its booklet in our own inventory, restored from the
             //host's save with nothing in it but a job id. Now that the job itself is here, the two
             //can be put back together.
-            JobBookletRestorer.JobArrived(networkedJob);
+            JobPaperwork.JobArrived(networkedJob);
         }
         else
         {
