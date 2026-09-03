@@ -2,6 +2,8 @@ using DV.Booklets;
 using Multiplayer.Components.Networking.World;
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
 
 namespace Multiplayer.Components.Networking.Jobs;
 
@@ -15,6 +17,7 @@ namespace Multiplayer.Components.Networking.Jobs;
 public static class JobBookletRestorer
 {
     private const int WAIT_FRAMES = 600;
+    private const float SETTLE_SECONDS = 10f;
 
     /// <summary>
     /// A job has just arrived from the host. Does this player already carry its booklet?
@@ -44,6 +47,33 @@ public static class JobBookletRestorer
 
         //We are in the middle of the storage load, so let the booklet finish arriving first.
         NetworkLifecycle.Instance.StartCoroutine(ReuniteNextFrame(netJob, booklet));
+    }
+
+    /// <summary>
+    /// The host has said everything it has to say about jobs. A booklet still holding nothing but a
+    /// job id belongs to a job that no longer exists, and is only dead paper now.
+    /// </summary>
+    public static void JoinFinished()
+    {
+        if (!OnAClient())
+            return;
+
+        NetworkLifecycle.Instance.StartCoroutine(ThrowAwayBookletsWithoutAJob());
+    }
+
+    private static IEnumerator ThrowAwayBookletsWithoutAJob()
+    {
+        //Jobs whose cars are still being spawned arrive a little after the rest, so give them time.
+        yield return new WaitForSeconds(SETTLE_SECONDS);
+
+        foreach (JobBooklet booklet in new List<JobBooklet>(JobBooklet.allExistingJobBooklets))
+        {
+            if (booklet == null || booklet.HasJobAssigned() || string.IsNullOrEmpty(booklet.jobIdLoadedData))
+                continue;
+
+            Multiplayer.Log($"JobBookletRestorer: job {booklet.jobIdLoadedData} is gone, throwing its booklet away");
+            booklet.DestroyJobBooklet();
+        }
     }
 
     /// <summary>

@@ -410,6 +410,9 @@ public class NetworkClient : NetworkManager
         displayLoadingInfo.OnLoadingStatusChanged("Complete", false, ((float)LoadingState / (float)PlayerLoadingState.Complete) * 100);
         yield return new WaitForSeconds(0.25f);
 
+        //Anything the player still carries for a job that no longer exists can go now.
+        JobBookletRestorer.JoinFinished();
+
         // Start culling player models
         ClientPlayerManager.StartCulling();
     }
